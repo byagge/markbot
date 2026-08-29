@@ -19,7 +19,7 @@ def get_client() -> AsyncOpenAI | None:
 FALLBACK_VERDICTS = [
     "Профиль выше среднего. Подкачай подарки — и будешь в топ-10%.",
     "Крепкий середнячок, но юзернейм подкачал.",
-    "Отличная база! Докрути био и будет огонь 🔥",
+    "Отличная база! Докрути описание профиля и будет огонь 🔥",
     "Неплохо, но есть куда расти. Подарки — твоя зона роста.",
     "Солидный профиль, видно что не первый день в Telegram.",
 ]
@@ -28,7 +28,7 @@ FALLBACK_VERDICTS = [
 def _fallback_verdict(scores: ProfileScores) -> str:
     weakest = min(
         [("аватарку", scores.avatar, 25), ("юзернейм", scores.username, 25),
-         ("подарки", scores.gifts, 25), ("био", scores.bio, 15), ("возраст", scores.age, 10)],
+         ("подарки", scores.gifts, 25), ("описание профиля", scores.bio, 15), ("возраст", scores.age, 10)],
         key=lambda x: x[1] / x[2],
     )
     if scores.total >= 85:
@@ -52,10 +52,12 @@ async def generate_verdict(
     name = f"@{username}" if username else "пользователь"
     prompt = f"""Ты — дерзкий, но дружелюбный бот ProfileMark. Напиши вердикт профиля Telegram в 1-2 предложения.
 Профиль: {name}, итог {scores.total}/100.
-Аватар {scores.avatar}/25, юзернейм {scores.username}/25, подарки {scores.gifts}/25,
-био {scores.bio}/15, возраст {scores.age}/10.
+Аватар {scores.avatar}/25, юзернейм {scores.username}/25, подарки {scores.gifts}/25.
+Подарки (реальные данные API, не выдумывай): {scores.gifts_summary}
+Описание профиля {scores.bio}/15, возраст {scores.age}/10.
 {"Это оценка своего профиля." if is_self else "Это оценка чужого профиля."}
-Стиль: живой, с лёгким юмором, без markdown, до 120 символов."""
+Стиль: живой, с лёгким юмором, без markdown, до 120 символов.
+Если упоминаешь подарки — опирайся только на строку «Подарки» выше."""
 
     try:
         resp = await client.chat.completions.create(

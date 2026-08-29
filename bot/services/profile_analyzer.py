@@ -1,9 +1,11 @@
 from dataclasses import dataclass
-import hashlib
 import re
 
+from aiogram import Bot
 from aiogram.types import User
 
+from bot.services.gifts import analyze_gifts, fetch_all_user_gifts
+from bot.services.profile_fetcher import fetch_profile_description, user_has_photo
 from bot.utils.emoji import stars
 
 
@@ -15,6 +17,7 @@ class ProfileScores:
     bio: int
     age: int
     gifts_count: int
+    gifts_summary: str = ""
     avatar_note: str = ""
     username_note: str = ""
     gifts_note: str = ""
@@ -34,12 +37,8 @@ class ProfileScores:
             "age": self.age,
             "total": self.total,
             "gifts_count": self.gifts_count,
+            "gifts_summary": self.gifts_summary,
         }
-
-
-def _seed(user_id: int, salt: str) -> int:
-    h = hashlib.md5(f"{user_id}:{salt}".encode()).hexdigest()
-    return int(h[:8], 16)
 
 
 def estimate_account_year(user_id: int) -> int:
@@ -56,7 +55,6 @@ def estimate_account_year(user_id: int) -> int:
     if user_id < 5_000_000_000:
         return 2023
     return 2024
-
 
 
 def stars_for_score(score: int) -> str:
@@ -106,56 +104,70 @@ def analyze_username(username: str | None) -> tuple[int, str]:
     return score, note
 
 
-def analyze_profile(user: User, has_photo: bool = True) -> ProfileScores:
-    uid = user.id
-    seed = _seed(uid, "profile")
+def analyze_profile_description(description: str | None) -> tuple[int, str]:
+    if not description or not description.strip():
+        return 0, "не заполнено"
 
-    # Avatar — up to 25
+    text = description.strip()
+    score = 4
+    if len(text) >= 15:
+        score += 3
+    if len(text) >= 40:
+        score += 3
+    if len(text) >= 80:
+        score += 2
+    if "http" in text or "t.me/" in text or "@" in text:
+        score += 2
+
+    score = min(15, score)
+    if score >= 12:
+        note = "полное описание"
+    elif score >= 8:
+        note = "оформлено"
+    else:
+        note = "минимум"
+    return score, note
+
+
+def _avatar_score(user: User, has_photo: bool) -> tuple[int, str]:
     if not has_photo:
-        avatar, avatar_note = 0, "нет фото / скрыто"
-    else:
-        avatar = 12 + (seed % 14)
-        if user.is_premium:
-            avatar = min(25, avatar + 3)
-        avatar_note = "есть фото" if avatar >= 15 else "базовое"
+        return 0, "нет фото / скрыто"
+    score = 18 if user.is_premium else 14
+    return min(25, score), "есть фото"
 
-    # Username — up to 25
-    username_score, username_note = analyze_username(user.username)
 
-    # Gifts — simulated (Bot API не отдаёт подарки), up to 25
-    gifts_count = (seed % 8) if user.is_premium else (seed % 5)
-    if gifts_count == 0:
-        gifts, gifts_note = seed % 6, "подарков не видно"
-    elif gifts_count <= 2:
-        gifts = 10 + gifts_count * 3
-        gifts_note = f"{gifts_count} подарка в профиле"
-    elif gifts_count <= 5:
-        gifts = 18 + (gifts_count - 2)
-        gifts_note = f"{gifts_count} подарков — красавчик"
-    else:
-        gifts = 25
-        gifts_note = f"{gifts_count} подарков — легенда"
-    gifts = min(25, gifts)
-
-    # Bio — up to 15 (simulated from seed + premium)
-    bio_base = 5 + (seed % 11)
-    if user.is_premium:
-        bio_base += 2
-    if user.first_name and len(user.first_name) > 2:
-        bio_base += 1
-    bio = min(15, bio_base)
-    bio_note = "оформлено" if bio >= 10 else "минимум"
-
-    # Age — up to 10 (mockup shows 15 but spec says 10; using 10 per spec)
-    year = estimate_account_year(uid)
-    age_map = {2013: 10, 2014: 10, 2015: 9, 2016: 8, 2017: 7, 2018: 6, 2019: 5, 2020: 4, 2021: 3, 2022: 2, 2023: 1, 2024: 0}
+def _age_score(user_id: int) -> tuple[int, str]:
+    year = estimate_account_year(user_id)
+    age_map = {
+        2013: 10, 2014: 10, 2015: 9, 2016: 8, 2017: 7, 2018: 6,
+        2019: 5, 2020: 4, 2021: 3, 2022: 2, 2023: 1, 2024: 0,
+    }
     age = age_map.get(year, 0)
     if year <= 2016:
-        age_note = f"с {year} года — олдфаг"
+        note = f"с {year} года — олдфаг"
     elif year <= 2020:
-        age_note = f"с {year} года"
+        note = f"с {year} года"
     else:
-        age_note = "новый аккаунт"
+        note = "новый аккаунт"
+    return age, note
+
+
+async def analyze_profile(bot: Bot, user: User, has_photo: bool | None = None) -> ProfileScores:
+    uid = user.id
+
+    if has_photo is None:
+        has_photo = await user_has_photo(bot, uid)
+
+    avatar, avatar_note = _avatar_score(user, has_photo)
+    username_score, username_note = analyze_username(user.username)
+
+    total_gifts, gifts_list = await fetch_all_user_gifts(bot, uid)
+    gifts, gifts_count, gifts_note, _, gifts_summary = analyze_gifts(total_gifts, gifts_list)
+
+    description = await fetch_profile_description(bot, uid)
+    bio, bio_note = analyze_profile_description(description)
+
+    age, age_note = _age_score(uid)
 
     return ProfileScores(
         avatar=avatar,
@@ -164,6 +176,7 @@ def analyze_profile(user: User, has_photo: bool = True) -> ProfileScores:
         bio=bio,
         age=age,
         gifts_count=gifts_count,
+        gifts_summary=gifts_summary,
         avatar_note=avatar_note,
         username_note=username_note,
         gifts_note=gifts_note,

@@ -1,6 +1,3 @@
-import hashlib
-import re
-
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
@@ -9,45 +6,14 @@ from bot.database.repo import Repository
 from bot.keyboards.callbacks import RateCB
 from bot.keyboards.inline import rate_other_result_kb
 from bot.services.openai_service import generate_compare_verdict, generate_verdict
-from bot.services.profile_analyzer import ProfileScores, analyze_profile
+from bot.services.profile_analyzer import analyze_profile
+from bot.services.profile_fetcher import resolve_target_user
 from bot.states import RateOtherStates
 from bot.utils.emoji import e, plain
 from bot.utils.navigation import edit_or_send, run_loading_animation
 from bot.utils.texts import display_name, format_compare_result, format_rating_result
 
 router = Router()
-
-
-def _uid_from_username(username: str) -> int:
-    h = hashlib.md5(username.lower().encode()).hexdigest()
-    return int(h[:12], 16) % 9_000_000_000 + 1_000_000_000
-
-
-def extract_user_from_message(message: Message) -> User | None:
-    if message.forward_origin and getattr(message.forward_origin, "sender_user", None):
-        return message.forward_origin.sender_user
-    if message.forward_from:
-        return message.forward_from
-    if message.text:
-        match = re.search(r"@([a-zA-Z0-9_]{4,32})", message.text.strip())
-        if match:
-            return User(
-                id=_uid_from_username(match.group(1)),
-                is_bot=False,
-                first_name=match.group(1),
-                username=match.group(1),
-            )
-    if message.entities:
-        for ent in message.entities:
-            if ent.type == "mention" and message.text:
-                uname = message.text[ent.offset + 1 : ent.offset + ent.length]
-                return User(
-                    id=_uid_from_username(uname),
-                    is_bot=False,
-                    first_name=uname,
-                    username=uname,
-                )
-    return None
 
 
 async def perform_other_rating(
@@ -67,7 +33,7 @@ async def perform_other_rating(
 
     await run_loading_animation(msg, header)
 
-    scores = analyze_profile(target, has_photo=True)
+    scores = await analyze_profile(message.bot, target)
     verdict = await generate_verdict(target.username, scores, is_self=False)
 
     await repo.save_rating(
@@ -95,12 +61,13 @@ async def receive_target(message: Message, state: FSMContext, repo: Repository) 
     if not user:
         return
 
-    target = extract_user_from_message(message)
+    target = await resolve_target_user(message, message.bot)
     if not target:
         nav_id = await repo.get_nav_message(user.id)
         text = (
             f"{e('cross')} <b>Не понял.</b> Пришли @username или перешли сообщение.\n\n"
-            "Пример: <code>@durov</code>"
+            "Пример: <code>@durov</code>\n\n"
+            "<i>Юзернейм должен быть публичным.</i>"
         )
         if nav_id:
             try:
@@ -140,7 +107,7 @@ async def compare_profiles(callback: CallbackQuery, callback_data: RateCB, repo:
     if not callback.message:
         return
 
-    my_scores = analyze_profile(user, has_photo=True)
+    my_scores = await analyze_profile(callback.bot, user)
     stored = await repo.get_last_other_rating(user.id, callback_data.uid)
 
     if stored and stored.target_username:
@@ -150,17 +117,10 @@ async def compare_profiles(callback: CallbackQuery, callback_data: RateCB, repo:
             first_name=stored.target_username,
             username=stored.target_username,
         )
-        other_scores = ProfileScores(
-            avatar=stored.avatar_score,
-            username=stored.username_score,
-            gifts=stored.gifts_score,
-            bio=stored.bio_score,
-            age=stored.age_score,
-            gifts_count=stored.gifts_count,
-        )
+        other_scores = await analyze_profile(callback.bot, other)
     else:
         other = User(id=callback_data.uid, is_bot=False, first_name="user")
-        other_scores = analyze_profile(other, has_photo=True)
+        other_scores = await analyze_profile(callback.bot, other)
 
     my_name = display_name(user.username, user.first_name)
     other_name = display_name(other.username, other.first_name)

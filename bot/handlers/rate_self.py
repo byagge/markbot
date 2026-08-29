@@ -29,7 +29,7 @@ async def perform_self_rating(
 
     await run_loading_animation(msg, header)
 
-    scores = analyze_profile(user, has_photo=True)
+    scores = await analyze_profile(message.bot, user)
     verdict = await generate_verdict(user.username, scores, is_self=True)
 
     await repo.save_rating(
