@@ -1,0 +1,56 @@
+import asyncio
+import logging
+import sys
+
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
+
+from bot.config import settings
+from bot.database import db
+from bot.handlers import router
+from bot.middlewares import DatabaseMiddleware, SubscriptionMiddleware
+
+from bot.utils.emoji import plain
+
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+logger = logging.getLogger(__name__)
+
+BOT_COMMANDS = [
+    BotCommand(command="start", description=f"{plain('home')} Главное меню"),
+    BotCommand(command="menu", description=f"{plain('memo')} Меню"),
+]
+
+
+async def on_startup(bot: Bot) -> None:
+    await bot.set_my_commands(BOT_COMMANDS, scope=BotCommandScopeAllPrivateChats())
+    me = await bot.get_me()
+    logger.info("Bot @%s ready", me.username)
+
+
+async def main() -> None:
+    await db.init()
+
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    dp = Dispatcher(storage=MemoryStorage())
+
+    dp.update.middleware(DatabaseMiddleware())
+    dp.update.middleware(SubscriptionMiddleware())
+    dp.startup.register(on_startup)
+
+    dp.include_router(router)
+
+    logger.info("ProfileMark bot starting...")
+    await dp.start_polling(
+        bot,
+        allowed_updates=["message", "callback_query", "chat_member"],
+    )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
