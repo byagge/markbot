@@ -57,6 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_ratings_total ON ratings(total_score DESC);
 CREATE INDEX IF NOT EXISTS idx_ratings_gifts ON ratings(gifts_score DESC);
 CREATE INDEX IF NOT EXISTS idx_ratings_username ON ratings(username_score DESC);
 CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 """
 
 

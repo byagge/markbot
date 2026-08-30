@@ -69,6 +69,38 @@ class Repository:
         row = await cur.fetchone()
         return row["nav_message_id"] if row else None
 
+    async def find_by_username(self, username: str) -> dict | None:
+        cur = await self.db.execute(
+            """
+            SELECT telegram_id, username, first_name, is_premium
+            FROM users
+            WHERE username = ? COLLATE NOCASE
+            ORDER BY last_active DESC
+            LIMIT 1
+            """,
+            (username.lstrip("@"),),
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def find_rated_by_username(self, username: str) -> dict | None:
+        cur = await self.db.execute(
+            """
+            SELECT r.target_telegram_id AS telegram_id,
+                   r.target_username AS username,
+                   u.first_name AS first_name
+            FROM ratings r
+            LEFT JOIN users u ON u.telegram_id = r.target_telegram_id
+            WHERE r.target_username = ? COLLATE NOCASE
+              AND r.target_telegram_id IS NOT NULL
+            ORDER BY r.created_at DESC
+            LIMIT 1
+            """,
+            (username.lstrip("@"),),
+        )
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
     async def save_rating(
         self,
         rater_id: int,

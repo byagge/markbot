@@ -9,34 +9,37 @@ logger = logging.getLogger(__name__)
 
 
 async def fetch_all_user_gifts(bot: Bot, user_id: int) -> tuple[int, list]:
-    """Fetch all gifts via getUserGifts with pagination."""
+    """Fetch all gifts via getUserGifts, then getChatGifts as fallback."""
     gifts: list = []
     total_count = 0
-    offset = ""
 
-    try:
-        while True:
-            result = await bot.get_user_gifts(
-                user_id=user_id,
-                offset=offset,
-                limit=100,
-                sort_by_price=True,
-            )
-            total_count = max(result.total_count, total_count)
+    async def paginate(method, id_kw: dict) -> None:
+        nonlocal gifts, total_count
+        offset = ""
+        for _ in range(40):
+            try:
+                result = await method(limit=100, offset=offset, **id_kw)
+            except TelegramBadRequest as exc:
+                logger.info("gifts fetch failed for %s: %s", id_kw, exc)
+                return
+            except Exception as exc:
+                logger.warning("gifts fetch error for %s: %s", id_kw, exc)
+                return
+            total_count = max(total_count, result.total_count)
             gifts.extend(result.gifts)
             if not result.next_offset:
                 break
             offset = result.next_offset
-    except TelegramBadRequest as exc:
-        logger.info("getUserGifts failed for %s: %s", user_id, exc)
-        return 0, []
-    except Exception as exc:
-        logger.warning("getUserGifts error for %s: %s", user_id, exc)
-        return 0, []
 
+    await paginate(bot.get_user_gifts, {"user_id": user_id})
     if total_count < len(gifts):
         total_count = len(gifts)
+    if not gifts:
+        await paginate(bot.get_chat_gifts, {"chat_id": user_id})
+        if total_count < len(gifts):
+            total_count = len(gifts)
 
+    logger.info("gifts for %s: total=%s fetched=%s", user_id, total_count, len(gifts))
     return total_count, gifts
 
 

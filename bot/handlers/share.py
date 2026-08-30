@@ -1,4 +1,5 @@
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineQuery, InlineQueryResultArticle, InputTextMessageContent
 
 from bot.config import settings
@@ -6,15 +7,18 @@ from bot.database.repo import Repository
 from bot.handlers.rate_self import perform_self_rating
 from bot.keyboards.callbacks import MenuCB
 from bot.utils.emoji import plain
+from bot.utils.navigation import drop_reply_keyboard
 
 router = Router()
 
 
 @router.callback_query(MenuCB.filter(F.action == "rate_self"))
-async def rate_self_callback(callback: CallbackQuery, repo: Repository) -> None:
+async def rate_self_callback(callback: CallbackQuery, state: FSMContext, repo: Repository) -> None:
+    await state.clear()
     await callback.answer()
     if not callback.message:
         return
+    await drop_reply_keyboard(callback.bot, callback.message.chat.id)
     await perform_self_rating(callback.message, callback.from_user, repo, callback)
 
 

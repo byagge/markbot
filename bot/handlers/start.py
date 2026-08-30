@@ -1,5 +1,6 @@
 from aiogram import Router
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from bot.config import settings
@@ -30,7 +31,8 @@ async def _send_main_or_subscribe(message: Message, repo: Repository) -> None:
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, repo: Repository) -> None:
+async def cmd_start(message: Message, state: FSMContext, repo: Repository) -> None:
+    await state.clear()
     user = message.from_user
     if not user:
         return
@@ -48,5 +50,6 @@ async def cmd_start(message: Message, repo: Repository) -> None:
 
 
 @router.message(Command("menu"))
-async def cmd_menu(message: Message, repo: Repository) -> None:
+async def cmd_menu(message: Message, state: FSMContext, repo: Repository) -> None:
+    await state.clear()
     await _send_main_or_subscribe(message, repo)

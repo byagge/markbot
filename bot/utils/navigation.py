@@ -3,11 +3,19 @@ from typing import Union
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 
 from bot.database.repo import Repository
 
 ParseTarget = Union[Message, CallbackQuery]
+
+
+async def drop_reply_keyboard(bot: Bot, chat_id: int) -> None:
+    try:
+        tmp = await bot.send_message(chat_id, "\u2060", reply_markup=ReplyKeyboardRemove())
+        await tmp.delete()
+    except TelegramBadRequest:
+        pass
 
 
 async def edit_or_send(
