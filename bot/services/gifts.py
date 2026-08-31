@@ -8,39 +8,84 @@ from aiogram.types import OwnedGiftRegular, OwnedGiftUnique
 logger = logging.getLogger(__name__)
 
 
-async def fetch_all_user_gifts(bot: Bot, user_id: int) -> tuple[int, list]:
-    """Fetch all gifts via getUserGifts, then getChatGifts as fallback."""
+async def _paginate_gifts(method, id_kw: dict, extra_kw: dict | None = None) -> tuple[int, list]:
     gifts: list = []
     total_count = 0
+    offset = ""
+    extra_kw = extra_kw or {}
 
-    async def paginate(method, id_kw: dict) -> None:
-        nonlocal gifts, total_count
-        offset = ""
-        for _ in range(40):
-            try:
-                result = await method(limit=100, offset=offset, **id_kw)
-            except TelegramBadRequest as exc:
-                logger.info("gifts fetch failed for %s: %s", id_kw, exc)
-                return
-            except Exception as exc:
-                logger.warning("gifts fetch error for %s: %s", id_kw, exc)
-                return
-            total_count = max(total_count, result.total_count)
-            gifts.extend(result.gifts)
-            if not result.next_offset:
-                break
-            offset = result.next_offset
+    for _ in range(40):
+        try:
+            result = await method(
+                limit=100,
+                offset=offset,
+                sort_by_price=True,
+                **id_kw,
+                **extra_kw,
+            )
+        except TelegramBadRequest as exc:
+            logger.info("gifts fetch failed %s %s: %s", method.__name__, {**id_kw, **extra_kw}, exc)
+            return 0, []
+        except Exception as exc:
+            logger.warning("gifts fetch error %s %s: %s", method.__name__, {**id_kw, **extra_kw}, exc)
+            return 0, []
 
-    await paginate(bot.get_user_gifts, {"user_id": user_id})
+        total_count = max(total_count, result.total_count)
+        gifts.extend(result.gifts)
+        if not result.next_offset:
+            break
+        offset = result.next_offset
+
     if total_count < len(gifts):
         total_count = len(gifts)
-    if not gifts:
-        await paginate(bot.get_chat_gifts, {"chat_id": user_id})
-        if total_count < len(gifts):
-            total_count = len(gifts)
-
-    logger.info("gifts for %s: total=%s fetched=%s", user_id, total_count, len(gifts))
     return total_count, gifts
+
+
+async def fetch_all_user_gifts(
+    bot: Bot,
+    user_id: int,
+    username: str | None = None,
+) -> tuple[int, list]:
+    """
+    Fetch profile gifts. For other users getChatGifts(@username) is the reliable path;
+    getUserGifts(user_id) often returns empty without a prior chat with the bot.
+    """
+    attempts: list[tuple[str, object, dict, dict]] = []
+
+    if username:
+        uname = username.lstrip("@")
+        attempts.extend([
+            ("chat_username_profile", bot.get_chat_gifts, {"chat_id": f"@{uname}"}, {"exclude_unsaved": True}),
+            ("chat_username", bot.get_chat_gifts, {"chat_id": f"@{uname}"}, {}),
+            ("chat_username_all", bot.get_chat_gifts, {"chat_id": f"@{uname}"}, {"exclude_unsaved": False}),
+        ])
+
+    attempts.extend([
+        ("user_gifts", bot.get_user_gifts, {"user_id": user_id}, {}),
+        ("chat_id_profile", bot.get_chat_gifts, {"chat_id": user_id}, {"exclude_unsaved": True}),
+        ("chat_id", bot.get_chat_gifts, {"chat_id": user_id}, {}),
+    ])
+
+    best_total = 0
+    best_gifts: list = []
+    best_source = "none"
+
+    for label, method, id_kw, extra_kw in attempts:
+        total, gifts = await _paginate_gifts(method, id_kw, extra_kw)
+        if total > best_total or (total == best_total and len(gifts) > len(best_gifts)):
+            best_total, best_gifts, best_source = total, gifts, label
+        if best_total > 0 and len(best_gifts) >= best_total:
+            break
+
+    logger.info(
+        "gifts for uid=%s username=%s: total=%s fetched=%s source=%s",
+        user_id,
+        username,
+        best_total,
+        len(best_gifts),
+        best_source,
+    )
+    return best_total, best_gifts
 
 
 def _plural_gifts(count: int) -> str:

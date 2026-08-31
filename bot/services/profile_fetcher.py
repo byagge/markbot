@@ -10,12 +10,13 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramFor
 from aiogram.types import Message, MessageOriginHiddenUser, User
 
 from bot.database.repo import Repository
+from bot.keyboards.reply import PICK_USER_REQUEST_ID
 
 logger = logging.getLogger(__name__)
 
 RESERVED_PATHS = {
     "joinchat", "addstickers", "share", "socks", "proxy", "c", "s", "iv",
-    "addlist", "boost", "giftcode", "nft", "login", "setlanguage", "proxy",
+    "addlist", "boost", "giftcode", "nft", "login", "setlanguage",
 }
 
 HOMOGLYPHS = str.maketrans({
@@ -67,7 +68,9 @@ def extract_username(text: str) -> str | None:
     mention = MENTION_RE.search(cleaned)
     if mention:
         return normalize_username(mention.group(1))
-    return normalize_username(cleaned)
+    if cleaned.startswith("@"):
+        return normalize_username(cleaned)
+    return None
 
 
 def user_from_chat(chat) -> User:
@@ -108,6 +111,8 @@ async def get_chat_user(bot: Bot, chat_id: int | str) -> User | None:
 
 async def resolve_target_user(message: Message, bot: Bot, repo: Repository | None = None) -> ResolveResult:
     if message.users_shared and message.users_shared.users:
+        if message.users_shared.request_id != PICK_USER_REQUEST_ID:
+            return ResolveResult(error="Неизвестный запрос выбора пользователя.")
         shared = message.users_shared.users[0]
         user = User(
             id=shared.user_id,
@@ -187,38 +192,38 @@ async def resolve_target_user(message: Message, bot: Bot, repo: Repository | Non
 
 
 async def _resolve_username(bot: Bot, username: str, repo: Repository | None) -> ResolveResult:
+    live = await get_chat_user(bot, f"@{username}")
+    if live:
+        return ResolveResult(user=live)
+
+    async def from_row(row: dict) -> ResolveResult | None:
+        uid = row["telegram_id"]
+        filled = await get_chat_user(bot, uid)
+        if filled:
+            if filled.username and filled.username.lower() != username.lower():
+                return None
+            return ResolveResult(user=filled)
+        return ResolveResult(
+            user=user_from_row(
+                uid,
+                row.get("username") or username,
+                row.get("first_name"),
+                bool(row.get("is_premium")),
+            )
+        )
+
     if repo:
         row = await repo.find_by_username(username)
         if row:
-            user = await get_chat_user(bot, row["telegram_id"])
-            if user:
-                return ResolveResult(user=user)
-            return ResolveResult(
-                user=user_from_row(
-                    row["telegram_id"],
-                    row.get("username") or username,
-                    row.get("first_name"),
-                    bool(row.get("is_premium")),
-                )
-            )
+            result = await from_row(row)
+            if result:
+                return result
 
-    user = await get_chat_user(bot, f"@{username}")
-    if user:
-        return ResolveResult(user=user)
-
-    if repo:
         rated = await repo.find_rated_by_username(username)
         if rated:
-            user = await get_chat_user(bot, rated["telegram_id"])
-            if user:
-                return ResolveResult(user=user)
-            return ResolveResult(
-                user=user_from_row(
-                    rated["telegram_id"],
-                    rated.get("username") or username,
-                    rated.get("first_name"),
-                )
-            )
+            result = await from_row(rated)
+            if result:
+                return result
 
     return ResolveResult(
         error=(
@@ -231,18 +236,25 @@ async def _resolve_username(bot: Bot, username: str, repo: Repository | None) ->
     )
 
 
-async def fetch_profile_description(bot: Bot, user_id: int) -> str | None:
-    try:
-        chat = await bot.get_chat(user_id)
-        bio = getattr(chat, "bio", None)
-        return bio.strip() if bio else None
-    except TelegramAPIError:
-        return None
+async def fetch_profile_description(bot: Bot, user_id: int, username: str | None = None) -> str | None:
+    candidates: list[int | str] = [user_id]
+    if username:
+        candidates.append(f"@{username.lstrip('@')}")
+
+    for chat_id in candidates:
+        try:
+            chat = await bot.get_chat(chat_id)
+            bio = getattr(chat, "bio", None)
+            if bio and bio.strip():
+                return bio.strip()
+        except TelegramAPIError:
+            continue
+    return None
 
 
-async def user_has_photo(bot: Bot, user_id: int) -> bool:
+async def user_has_photo(bot: Bot, user_id: int) -> bool | None:
     try:
         photos = await bot.get_user_profile_photos(user_id, limit=1)
         return bool(photos.total_count)
     except TelegramAPIError:
-        return False
+        return None

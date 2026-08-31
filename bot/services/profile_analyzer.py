@@ -41,6 +41,17 @@ class ProfileScores:
         }
 
 
+def scores_from_rating_row(row) -> ProfileScores:
+    return ProfileScores(
+        avatar=row.avatar_score,
+        username=row.username_score,
+        gifts=row.gifts_score,
+        bio=row.bio_score,
+        age=row.age_score,
+        gifts_count=row.gifts_count,
+    )
+
+
 def estimate_account_year(user_id: int) -> int:
     if user_id < 50_000_000:
         return 2013
@@ -129,7 +140,10 @@ def analyze_profile_description(description: str | None) -> tuple[int, str]:
     return score, note
 
 
-def _avatar_score(user: User, has_photo: bool) -> tuple[int, str]:
+def _avatar_score(user: User, has_photo: bool | None) -> tuple[int, str]:
+    if has_photo is None:
+        score = 16 if user.is_premium else 12
+        return min(25, score), "фото не проверено"
     if not has_photo:
         return 0, "нет фото / скрыто"
     score = 18 if user.is_premium else 14
@@ -161,10 +175,10 @@ async def analyze_profile(bot: Bot, user: User, has_photo: bool | None = None) -
     avatar, avatar_note = _avatar_score(user, has_photo)
     username_score, username_note = analyze_username(user.username)
 
-    total_gifts, gifts_list = await fetch_all_user_gifts(bot, uid)
+    total_gifts, gifts_list = await fetch_all_user_gifts(bot, uid, user.username)
     gifts, gifts_count, gifts_note, _, gifts_summary = analyze_gifts(total_gifts, gifts_list)
 
-    description = await fetch_profile_description(bot, uid)
+    description = await fetch_profile_description(bot, uid, user.username)
     bio, bio_note = analyze_profile_description(description)
 
     age, age_note = _age_score(uid)

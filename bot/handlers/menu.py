@@ -49,7 +49,10 @@ async def show_info(callback: CallbackQuery, state: FSMContext, repo: Repository
 @router.callback_query(MenuCB.filter(F.action == "rate_other"))
 async def show_rate_other(callback: CallbackQuery, state: FSMContext, repo: Repository) -> None:
     await callback.answer()
+    await state.clear()
     await state.set_state(RateOtherStates.waiting_target)
+    user = callback.from_user
+    await repo.upsert_user(user.id, user.username, user.first_name, user.last_name, user.is_premium or False)
     if not callback.message:
         return
     chat_id = callback.message.chat.id

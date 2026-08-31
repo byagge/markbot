@@ -56,8 +56,14 @@ class Repository:
 
     async def set_nav_message(self, telegram_id: int, message_id: int) -> None:
         await self.db.execute(
-            "UPDATE users SET nav_message_id = ? WHERE telegram_id = ?",
-            (message_id, telegram_id),
+            """
+            INSERT INTO users (telegram_id, nav_message_id, last_active)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(telegram_id) DO UPDATE SET
+                nav_message_id = excluded.nav_message_id,
+                last_active = datetime('now')
+            """,
+            (telegram_id, message_id),
         )
         await self.db.commit()
 
@@ -88,7 +94,8 @@ class Repository:
             """
             SELECT r.target_telegram_id AS telegram_id,
                    r.target_username AS username,
-                   u.first_name AS first_name
+                   u.first_name AS first_name,
+                   COALESCE(u.is_premium, 0) AS is_premium
             FROM ratings r
             LEFT JOIN users u ON u.telegram_id = r.target_telegram_id
             WHERE r.target_username = ? COLLATE NOCASE

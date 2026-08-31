@@ -7,7 +7,7 @@ from bot.config import settings
 from bot.database.repo import Repository
 from bot.keyboards.inline import main_menu_kb, subscribe_kb
 from bot.services.subscription import format_subscribe_message, get_missing_channels
-from bot.utils.navigation import send_sticker_safe
+from bot.utils.navigation import drop_reply_keyboard, send_sticker_safe
 from bot.utils.texts import main_menu_text
 
 router = Router()
@@ -52,4 +52,5 @@ async def cmd_start(message: Message, state: FSMContext, repo: Repository) -> No
 @router.message(Command("menu"))
 async def cmd_menu(message: Message, state: FSMContext, repo: Repository) -> None:
     await state.clear()
+    await drop_reply_keyboard(message.bot, message.chat.id)
     await _send_main_or_subscribe(message, repo)

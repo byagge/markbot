@@ -70,6 +70,7 @@ class Database:
         async with aiosqlite.connect(self.path) as conn:
             conn.row_factory = aiosqlite.Row
             await conn.executescript(SCHEMA)
+            await conn.execute("PRAGMA journal_mode=WAL")
             await self._migrate(conn)
             await conn.commit()
 

@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message, User
 
@@ -9,6 +11,8 @@ from bot.services.profile_analyzer import analyze_profile
 from bot.utils.navigation import edit_or_send, run_loading_animation
 from bot.utils.emoji import e, plain
 from bot.utils.texts import format_rating_result
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -27,28 +31,36 @@ async def perform_self_rating(
     else:
         msg = message
 
-    await run_loading_animation(msg, header)
-
-    scores = await analyze_profile(message.bot, user)
-    verdict = await generate_verdict(user.username, scores, is_self=True)
-
-    await repo.save_rating(
-        user.id,
-        user.id,
-        user.username,
-        scores.as_dict(),
-        verdict,
-        is_self=True,
-    )
-
-    text = format_rating_result(user.username, scores, verdict, user.first_name)
-    kb = rate_self_result_kb(user.username, scores.total)
-
     try:
-        await msg.edit_text(text, reply_markup=kb, parse_mode="HTML")
+        await run_loading_animation(msg, header)
+        scores = await analyze_profile(message.bot, user)
+        verdict = await generate_verdict(user.username, scores, is_self=True)
+
+        await repo.save_rating(
+            user.id,
+            user.id,
+            user.username,
+            scores.as_dict(),
+            verdict,
+            is_self=True,
+        )
+
+        text = format_rating_result(user.username, scores, verdict, user.first_name)
+        kb = rate_self_result_kb(user.username, scores.total)
+
+        try:
+            await msg.edit_text(text, reply_markup=kb, parse_mode="HTML")
+            await repo.set_nav_message(user.id, msg.message_id)
+        except Exception:
+            new_msg = await message.answer(text, reply_markup=kb, parse_mode="HTML")
+            await repo.set_nav_message(user.id, new_msg.message_id)
     except Exception:
-        new_msg = await message.answer(text, reply_markup=kb, parse_mode="HTML")
-        await repo.set_nav_message(user.id, new_msg.message_id)
+        logger.exception("self rating failed for %s", user.id)
+        err = f"{e('cross')} <b>Ошибка анализа.</b> Попробуй позже."
+        try:
+            await msg.edit_text(err, parse_mode="HTML")
+        except Exception:
+            await message.answer(err, parse_mode="HTML")
 
 
 @router.callback_query(RateCB.filter(F.action == "retry_self"))
