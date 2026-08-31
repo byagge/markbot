@@ -38,6 +38,7 @@ class ResolveResult:
     user: User | None = None
     error: str | None = None
     has_photo: bool | None = None
+    verified: bool = True
 
 
 def _clean_text(text: str) -> str:
@@ -85,16 +86,6 @@ def user_from_chat(chat) -> User:
     )
 
 
-def user_from_row(telegram_id: int, username: str | None, first_name: str | None, is_premium: bool = False) -> User:
-    return User(
-        id=telegram_id,
-        is_bot=False,
-        first_name=first_name or username or "user",
-        username=username,
-        is_premium=is_premium,
-    )
-
-
 async def get_chat_user(bot: Bot, chat_id: int | str) -> User | None:
     try:
         chat = await bot.get_chat(chat_id)
@@ -129,13 +120,13 @@ async def resolve_target_user(message: Message, bot: Bot, repo: Repository | Non
             if user.first_name == "user" and filled.first_name:
                 user.first_name = filled.first_name
             user.is_premium = filled.is_premium
-        return ResolveResult(user=user, has_photo=has_photo)
+        return ResolveResult(user=user, has_photo=has_photo, verified=True)
 
     origin = message.forward_origin
     if origin is not None:
         sender = getattr(origin, "sender_user", None)
         if sender:
-            return ResolveResult(user=sender)
+            return ResolveResult(user=sender, verified=True)
         if isinstance(origin, MessageOriginHiddenUser):
             return ResolveResult(
                 error="Этот человек скрыл пересылку. Нажми «Выбрать пользователя» или пришли публичный @username.",
@@ -144,15 +135,15 @@ async def resolve_target_user(message: Message, bot: Bot, repo: Repository | Non
         if sender_chat and getattr(sender_chat, "username", None):
             user = await get_chat_user(bot, f"@{sender_chat.username}")
             if user:
-                return ResolveResult(user=user)
+                return ResolveResult(user=user, verified=True)
 
     if message.forward_from:
-        return ResolveResult(user=message.forward_from)
+        return ResolveResult(user=message.forward_from, verified=True)
 
     if message.entities and message.text:
         for ent in message.entities:
             if ent.type == "text_mention" and ent.user:
-                return ResolveResult(user=ent.user)
+                return ResolveResult(user=ent.user, verified=True)
             if ent.type == "mention":
                 raw = ent.extract_from(message.text)
                 username = normalize_username(raw)
@@ -171,19 +162,20 @@ async def resolve_target_user(message: Message, bot: Bot, repo: Repository | Non
         if message.text.strip().isdigit():
             user = await get_chat_user(bot, int(message.text.strip()))
             if user:
-                return ResolveResult(user=user)
+                return ResolveResult(user=user, verified=True)
 
     if message.contact and message.contact.user_id:
         user = await get_chat_user(bot, message.contact.user_id)
         if user:
-            return ResolveResult(user=user)
+            return ResolveResult(user=user, verified=True)
         return ResolveResult(
             user=User(
                 id=message.contact.user_id,
                 is_bot=False,
                 first_name=message.contact.first_name or "user",
                 last_name=message.contact.last_name,
-            )
+            ),
+            verified=True,
         )
 
     return ResolveResult(
@@ -194,44 +186,28 @@ async def resolve_target_user(message: Message, bot: Bot, repo: Repository | Non
 async def _resolve_username(bot: Bot, username: str, repo: Repository | None) -> ResolveResult:
     live = await get_chat_user(bot, f"@{username}")
     if live:
-        return ResolveResult(user=live)
-
-    async def from_row(row: dict) -> ResolveResult | None:
-        uid = row["telegram_id"]
-        filled = await get_chat_user(bot, uid)
-        if filled:
-            if filled.username and filled.username.lower() != username.lower():
-                return None
-            return ResolveResult(user=filled)
-        return ResolveResult(
-            user=user_from_row(
-                uid,
-                row.get("username") or username,
-                row.get("first_name"),
-                bool(row.get("is_premium")),
-            )
-        )
+        return ResolveResult(user=live, verified=True)
 
     if repo:
-        row = await repo.find_by_username(username)
-        if row:
-            result = await from_row(row)
-            if result:
-                return result
-
-        rated = await repo.find_rated_by_username(username)
-        if rated:
-            result = await from_row(rated)
-            if result:
-                return result
+        for finder in (repo.find_by_username, repo.find_rated_by_username):
+            row = await finder(username)
+            if not row:
+                continue
+            uid = row["telegram_id"]
+            filled = await get_chat_user(bot, uid)
+            if not filled:
+                continue
+            if filled.username and filled.username.lower() != username.lower():
+                continue
+            return ResolveResult(user=filled, verified=True)
 
     return ResolveResult(
         error=(
-            f"Не могу открыть @{username} только по нику — Telegram не отдаёт ботам id чужих аккаунтов.\n\n"
-            "Сделай одно из этого:\n"
-            "• нажми <b>Выбрать пользователя</b> и укажи его в списке\n"
-            "• перешли любое его сообщение\n"
-            "• пусть он сначала напишет боту /start"
+            f"Не могу открыть @{username} — Telegram не даёт боту id по одному только нику.\n\n"
+            "Для точной оценки (подарки, фото, описание):\n"
+            "• нажми <b>Выбрать пользователя</b>\n"
+            "• или перешли любое его сообщение\n\n"
+            "Либо пусть человек напишет боту /start — тогда @username тоже сработает."
         )
     )
 
@@ -252,7 +228,14 @@ async def fetch_profile_description(bot: Bot, user_id: int, username: str | None
     return None
 
 
-async def user_has_photo(bot: Bot, user_id: int) -> bool | None:
+async def user_has_photo(bot: Bot, user_id: int, username: str | None = None) -> bool | None:
+    try:
+        chat = await bot.get_chat(user_id)
+        if getattr(chat, "photo", None):
+            return True
+    except TelegramAPIError:
+        pass
+
     try:
         photos = await bot.get_user_profile_photos(user_id, limit=1)
         return bool(photos.total_count)

@@ -170,7 +170,7 @@ async def analyze_profile(bot: Bot, user: User, has_photo: bool | None = None) -
     uid = user.id
 
     if has_photo is None:
-        has_photo = await user_has_photo(bot, uid)
+        has_photo = await user_has_photo(bot, uid, user.username)
 
     avatar, avatar_note = _avatar_score(user, has_photo)
     username_score, username_note = analyze_username(user.username)

@@ -47,24 +47,22 @@ async def fetch_all_user_gifts(
     username: str | None = None,
 ) -> tuple[int, list]:
     """
-    Fetch profile gifts. For other users getChatGifts(@username) is the reliable path;
-    getUserGifts(user_id) often returns empty without a prior chat with the bot.
+    Profile gifts for regular users: getUserGifts(user_id) / getChatGifts(user_id).
+    getChatGifts(@username) works only for public accounts (e.g. @durov), not typical users.
     """
-    attempts: list[tuple[str, object, dict, dict]] = []
+    attempts: list[tuple[str, object, dict, dict]] = [
+        ("user_gifts", bot.get_user_gifts, {"user_id": user_id}, {}),
+        ("chat_id", bot.get_chat_gifts, {"chat_id": user_id}, {}),
+        ("chat_id_profile", bot.get_chat_gifts, {"chat_id": user_id}, {"exclude_unsaved": True}),
+        ("chat_id_all", bot.get_chat_gifts, {"chat_id": user_id}, {"exclude_unsaved": False}),
+    ]
 
     if username:
         uname = username.lstrip("@")
         attempts.extend([
-            ("chat_username_profile", bot.get_chat_gifts, {"chat_id": f"@{uname}"}, {"exclude_unsaved": True}),
             ("chat_username", bot.get_chat_gifts, {"chat_id": f"@{uname}"}, {}),
-            ("chat_username_all", bot.get_chat_gifts, {"chat_id": f"@{uname}"}, {"exclude_unsaved": False}),
+            ("chat_username_profile", bot.get_chat_gifts, {"chat_id": f"@{uname}"}, {"exclude_unsaved": True}),
         ])
-
-    attempts.extend([
-        ("user_gifts", bot.get_user_gifts, {"user_id": user_id}, {}),
-        ("chat_id_profile", bot.get_chat_gifts, {"chat_id": user_id}, {"exclude_unsaved": True}),
-        ("chat_id", bot.get_chat_gifts, {"chat_id": user_id}, {}),
-    ])
 
     best_total = 0
     best_gifts: list = []
@@ -191,7 +189,7 @@ def analyze_gifts(total_count: int, gifts: list) -> tuple[int, int, str, int, st
     Returns: score (0-25), visible_count, note, total_stars, summary for AI
     """
     if total_count <= 0 or not gifts:
-        return 0, 0, "подарков не видно", 0, "подарков не видно"
+        return 0, 0, "нет на профиле или скрыты", 0, "подарков нет"
 
     visible = [
         g for g in gifts
@@ -199,7 +197,7 @@ def analyze_gifts(total_count: int, gifts: list) -> tuple[int, int, str, int, st
     ]
     count = max(total_count, len(visible))
     if count <= 0:
-        return 0, 0, "подарков не видно", 0, "подарков не видно"
+        return 0, 0, "нет на профиле или скрыты", 0, "подарков нет"
 
     model_scores = [_model_points(g) for g in visible]
     total_model = sum(model_scores)
