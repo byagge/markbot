@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
     first_name TEXT,
     last_name TEXT,
     is_premium INTEGER DEFAULT 0,
+    is_anonymous INTEGER DEFAULT 0,
     nav_message_id INTEGER,
     registered_at TEXT DEFAULT (datetime('now')),
     last_active TEXT DEFAULT (datetime('now'))
@@ -82,6 +83,13 @@ class Database:
         if "joins_count" not in cols:
             await conn.execute(
                 "ALTER TABLE required_channels ADD COLUMN joins_count INTEGER DEFAULT 0"
+            )
+
+        cur = await conn.execute("PRAGMA table_info(users)")
+        user_cols = {row[1] for row in await cur.fetchall()}
+        if "is_anonymous" not in user_cols:
+            await conn.execute(
+                "ALTER TABLE users ADD COLUMN is_anonymous INTEGER DEFAULT 0"
             )
 
     async def connect(self) -> aiosqlite.Connection:

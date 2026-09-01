@@ -8,11 +8,11 @@ from aiogram.types import CallbackQuery, Message, User
 from bot.database.repo import Repository
 from bot.handlers.rate_self import perform_self_rating
 from bot.keyboards.callbacks import RateCB
-from bot.keyboards.inline import main_menu_kb, rate_other_result_kb
+from bot.keyboards.inline import main_menu_kb, rate_other_prompt_kb, rate_other_result_kb
 from bot.keyboards.reply import CANCEL_TEXTS, PICK_USER_TEXT, rate_other_pick_kb, remove_kb
 from bot.services.openai_service import generate_compare_verdict, generate_verdict
 from bot.services.profile_analyzer import analyze_profile, scores_from_rating_row
-from bot.services.profile_fetcher import get_chat_user, resolve_target_user
+from bot.services.profile_fetcher import ResolveResult, get_chat_user, resolve_target_user
 from bot.states import RateOtherStates
 from bot.utils.emoji import e, plain
 from bot.utils.navigation import edit_or_send, run_loading_animation
@@ -84,8 +84,8 @@ async def perform_other_rating(
 
 
 async def _show_resolve_error(message: Message, user_id: int, repo: Repository, text: str) -> None:
-    nav_id = await repo.get_nav_message(user_id)
     full = f"{e('cross')} <b>Не получилось.</b>\n\n{text}"
+    nav_id = await repo.get_nav_message(user_id)
     if nav_id:
         try:
             await message.bot.edit_message_text(
@@ -93,44 +93,31 @@ async def _show_resolve_error(message: Message, user_id: int, repo: Repository, 
                 chat_id=message.chat.id,
                 message_id=nav_id,
                 parse_mode="HTML",
+                reply_markup=rate_other_prompt_kb(),
             )
-            return
         except TelegramBadRequest:
             pass
     await message.answer(full, parse_mode="HTML", reply_markup=rate_other_pick_kb())
 
 
-@router.message(RateOtherStates.waiting_target)
-async def receive_target(message: Message, state: FSMContext, repo: Repository) -> None:
+async def _process_target(message: Message, state: FSMContext, repo: Repository, result: ResolveResult) -> None:
     user = message.from_user
     if not user:
         return
 
-    text = (message.text or "").strip()
-    if text.lower() in CANCEL_TEXTS:
-        await state.clear()
-        msg = await message.answer(
-            main_menu_text(),
-            reply_markup=remove_kb(),
-            parse_mode="HTML",
-        )
-        await msg.edit_text(main_menu_text(), reply_markup=main_menu_kb(), parse_mode="HTML")
-        await repo.set_nav_message(user.id, msg.message_id)
-        return
-
-    if text == PICK_USER_TEXT:
-        return
-
-    result = await resolve_target_user(message, message.bot, repo)
     if not result.user:
         await _show_resolve_error(
             message,
             user.id,
             repo,
-            result.error
-            or "Пришли @username, перешли сообщение или нажми «Выбрать пользователя».",
+            result.error or "Пришли @username, перешли сообщение или нажми «👤 Выбрать пользователя».",
         )
         return
+
+    try:
+        await message.bot.send_chat_action(message.chat.id, "typing")
+    except TelegramBadRequest:
+        pass
 
     if result.user.id == user.id:
         await state.clear()
@@ -163,6 +150,48 @@ async def receive_target(message: Message, state: FSMContext, repo: Repository) 
             repo,
             "Что-то пошло не так. Попробуй ещё раз или выбери пользователя кнопкой ниже.",
         )
+
+
+@router.message(RateOtherStates.waiting_target, F.users_shared)
+async def receive_users_shared(message: Message, state: FSMContext, repo: Repository) -> None:
+    result = await resolve_target_user(message, message.bot, repo)
+    await _process_target(message, state, repo, result)
+
+
+@router.message(RateOtherStates.waiting_target, F.contact)
+async def receive_contact(message: Message, state: FSMContext, repo: Repository) -> None:
+    result = await resolve_target_user(message, message.bot, repo)
+    await _process_target(message, state, repo, result)
+
+
+@router.message(RateOtherStates.waiting_target)
+async def receive_target(message: Message, state: FSMContext, repo: Repository) -> None:
+    user = message.from_user
+    if not user:
+        return
+
+    text = (message.text or "").strip()
+    if text.lower() in CANCEL_TEXTS or text == "⬅️ Назад":
+        await state.clear()
+        msg = await message.answer(
+            main_menu_text(),
+            reply_markup=remove_kb(),
+            parse_mode="HTML",
+        )
+        await msg.edit_text(main_menu_text(), reply_markup=main_menu_kb(), parse_mode="HTML")
+        await repo.set_nav_message(user.id, msg.message_id)
+        return
+
+    if text == PICK_USER_TEXT or text == "Выбрать пользователя":
+        await message.answer(
+            f"{e('point_down')} Выбери человека в окне Telegram 👆",
+            reply_markup=rate_other_pick_kb(),
+            parse_mode="HTML",
+        )
+        return
+
+    result = await resolve_target_user(message, message.bot, repo)
+    await _process_target(message, state, repo, result)
 
 
 @router.callback_query(RateCB.filter(F.action == "compare"))

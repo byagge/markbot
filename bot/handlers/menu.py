@@ -5,6 +5,7 @@ from aiogram.types import CallbackQuery
 from bot.database.repo import Repository
 from bot.keyboards.callbacks import MenuCB
 from bot.keyboards.inline import (
+    anonymity_kb,
     main_menu_kb,
     rating_info_kb,
     top_categories_kb,
@@ -13,6 +14,7 @@ from bot.keyboards.reply import rate_other_pick_kb
 from bot.states import RateOtherStates
 from bot.utils.navigation import drop_reply_keyboard, edit_or_send
 from bot.utils.texts import (
+    anonymity_text,
     main_menu_text,
     rate_other_prompt,
     rating_info_text,
@@ -44,6 +46,42 @@ async def show_info(callback: CallbackQuery, state: FSMContext, repo: Repository
     if callback.message:
         await drop_reply_keyboard(callback.bot, callback.message.chat.id)
     await edit_or_send(callback, rating_info_text(), rating_info_kb(), repo=repo, user_id=callback.from_user.id)
+
+
+@router.callback_query(MenuCB.filter(F.action == "anonymity"))
+async def show_anonymity(callback: CallbackQuery, state: FSMContext, repo: Repository) -> None:
+    await state.clear()
+    await callback.answer()
+    user = callback.from_user
+    await repo.upsert_user(user.id, user.username, user.first_name, user.last_name, user.is_premium or False)
+    is_on = await repo.is_anonymous(user.id)
+    if callback.message:
+        await drop_reply_keyboard(callback.bot, callback.message.chat.id)
+    await edit_or_send(
+        callback,
+        anonymity_text(is_on),
+        anonymity_kb(is_on),
+        repo=repo,
+        user_id=user.id,
+    )
+
+
+@router.callback_query(MenuCB.filter(F.action == "toggle_anonymity"))
+async def toggle_anonymity(callback: CallbackQuery, repo: Repository) -> None:
+    user = callback.from_user
+    await repo.upsert_user(user.id, user.username, user.first_name, user.last_name, user.is_premium or False)
+    is_on = await repo.toggle_anonymous(user.id)
+    await callback.answer(
+        "Анонимность включена — ты скрыт из рейтингов" if is_on else "Анонимность выключена",
+        show_alert=True,
+    )
+    await edit_or_send(
+        callback,
+        anonymity_text(is_on),
+        anonymity_kb(is_on),
+        repo=repo,
+        user_id=user.id,
+    )
 
 
 @router.callback_query(MenuCB.filter(F.action == "rate_other"))

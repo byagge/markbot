@@ -41,7 +41,9 @@ async def build_top_text(repo: Repository, user_id: int, category: str) -> str:
 
     rank_data = await repo.get_user_rank(user_id, category if category != "friends" else "general")
     lines.append("")
-    if rank_data:
+    if await repo.is_anonymous(user_id):
+        lines.append(f"{e('user')} <b>Режим анонимности включён</b> — ты скрыт из рейтингов.")
+    elif rank_data:
         rank, score = rank_data
         lines.append(f"{e('chart')} <b>Твоё место:</b> #{rank} ({score}/100)")
         threshold = await repo.get_top10_threshold(category if category != "friends" else "general")

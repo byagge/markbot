@@ -122,6 +122,29 @@ async def resolve_target_user(message: Message, bot: Bot, repo: Repository | Non
             user.is_premium = filled.is_premium
         return ResolveResult(user=user, has_photo=has_photo, verified=True)
 
+    if message.contact:
+        if not message.contact.user_id:
+            return ResolveResult(
+                error=(
+                    "У этого контакта нет Telegram-профиля (только номер телефона).\n\n"
+                    "Используй кнопку <b>👤 Выбрать пользователя</b> "
+                    "или перешли сообщение от этого человека."
+                ),
+            )
+        user = await get_chat_user(bot, message.contact.user_id)
+        if user:
+            return ResolveResult(user=user, verified=True)
+        return ResolveResult(
+            user=User(
+                id=message.contact.user_id,
+                is_bot=False,
+                first_name=message.contact.first_name or "user",
+                last_name=message.contact.last_name,
+                username=None,
+            ),
+            verified=True,
+        )
+
     origin = message.forward_origin
     if origin is not None:
         sender = getattr(origin, "sender_user", None)
@@ -164,22 +187,8 @@ async def resolve_target_user(message: Message, bot: Bot, repo: Repository | Non
             if user:
                 return ResolveResult(user=user, verified=True)
 
-    if message.contact and message.contact.user_id:
-        user = await get_chat_user(bot, message.contact.user_id)
-        if user:
-            return ResolveResult(user=user, verified=True)
-        return ResolveResult(
-            user=User(
-                id=message.contact.user_id,
-                is_bot=False,
-                first_name=message.contact.first_name or "user",
-                last_name=message.contact.last_name,
-            ),
-            verified=True,
-        )
-
     return ResolveResult(
-        error="Не понял. Пришли @username, ссылку t.me/..., перешли сообщение или нажми «Выбрать пользователя».",
+        error="Не понял. Пришли @username, ссылку t.me/..., перешли сообщение или нажми «👤 Выбрать пользователя».",
     )
 
 
@@ -193,21 +202,31 @@ async def _resolve_username(bot: Bot, username: str, repo: Repository | None) ->
             row = await finder(username)
             if not row:
                 continue
-            uid = row["telegram_id"]
+            uid = int(row["telegram_id"])
             filled = await get_chat_user(bot, uid)
-            if not filled:
+            if filled:
+                if filled.username and filled.username.lower() != username.lower():
+                    continue
+                return ResolveResult(user=filled, verified=True)
+            stored_name = row.get("username") or username
+            if stored_name.lower() != username.lower():
                 continue
-            if filled.username and filled.username.lower() != username.lower():
-                continue
-            return ResolveResult(user=filled, verified=True)
+            return ResolveResult(
+                user=User(
+                    id=uid,
+                    is_bot=False,
+                    first_name=row.get("first_name") or username,
+                    username=stored_name,
+                    is_premium=bool(row.get("is_premium")),
+                ),
+                verified=False,
+            )
 
     return ResolveResult(
         error=(
-            f"Не могу открыть @{username} — Telegram не даёт боту id по одному только нику.\n\n"
-            "Для точной оценки (подарки, фото, описание):\n"
-            "• нажми <b>Выбрать пользователя</b>\n"
-            "• или перешли любое его сообщение\n\n"
-            "Либо пусть человек напишет боту /start — тогда @username тоже сработает."
+            f"Не знаю @{username} — человек ещё не писал боту.\n\n"
+            "Нажми <b>👤 Выбрать пользователя</b> или перешли его сообщение.\n"
+            "После /start от него @username тоже заработает."
         )
     )
 

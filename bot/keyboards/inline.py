@@ -36,6 +36,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         [_btn("Оценить мой профиль", MenuCB(action="rate_self").pack(), "fire", "success")],
         [_btn("Оценить другого", MenuCB(action="rate_other").pack(), "people", "primary")],
         [_btn("Топ профилей", MenuCB(action="top").pack(), "trophy", "primary")],
+        [_btn("Анонимность", MenuCB(action="anonymity").pack(), "user")],
         [_btn("Как считается рейтинг", MenuCB(action="info").pack(), "question")],
     ])
 
@@ -74,6 +75,17 @@ def rate_other_result_kb(username: str | None, score: int, target_uid: int) -> I
 def rating_info_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [_btn("Оценить мой профиль", MenuCB(action="rate_self").pack(), "fire", "success")],
+        [_btn("Назад", MenuCB(action="menu").pack(), "back")],
+    ])
+
+
+def anonymity_kb(is_on: bool) -> InlineKeyboardMarkup:
+    if is_on:
+        toggle = _btn("Выключить анонимность", MenuCB(action="toggle_anonymity").pack(), "check", "success")
+    else:
+        toggle = _btn("Включить анонимность", MenuCB(action="toggle_anonymity").pack(), "user", "primary")
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [toggle],
         [_btn("Назад", MenuCB(action="menu").pack(), "back")],
     ])
 

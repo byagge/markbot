@@ -1,8 +1,13 @@
-from aiogram.types import KeyboardButton, KeyboardButtonRequestUsers, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from aiogram.types import (
+    KeyboardButton,
+    KeyboardButtonRequestUsers,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 
-CANCEL_TEXTS = {"назад", "отмена", "⬅️ назад", "/cancel"}
+CANCEL_TEXTS = {"назад", "отмена", "⬅️ назад", "/cancel", "⬅️ Назад"}
 PICK_USER_REQUEST_ID = 1
-PICK_USER_TEXT = "Выбрать пользователя"
+PICK_USER_TEXT = "👤 Выбрать пользователя"
 
 
 def rate_other_pick_kb() -> ReplyKeyboardMarkup:
@@ -21,11 +26,11 @@ def rate_other_pick_kb() -> ReplyKeyboardMarkup:
                     ),
                 )
             ],
-            [KeyboardButton(text="Назад")],
+            [KeyboardButton(text="⬅️ Назад")],
         ],
         resize_keyboard=True,
-        one_time_keyboard=True,
-        is_persistent=False,
+        one_time_keyboard=False,
+        is_persistent=True,
         input_field_placeholder="@username или перешли сообщение",
     )
 

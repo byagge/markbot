@@ -75,6 +75,32 @@ class Repository:
         row = await cur.fetchone()
         return row["nav_message_id"] if row else None
 
+    async def is_anonymous(self, telegram_id: int) -> bool:
+        cur = await self.db.execute(
+            "SELECT is_anonymous FROM users WHERE telegram_id = ?",
+            (telegram_id,),
+        )
+        row = await cur.fetchone()
+        return bool(row["is_anonymous"]) if row else False
+
+    async def set_anonymous(self, telegram_id: int, value: bool) -> None:
+        await self.db.execute(
+            """
+            INSERT INTO users (telegram_id, is_anonymous, last_active)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(telegram_id) DO UPDATE SET
+                is_anonymous = excluded.is_anonymous,
+                last_active = datetime('now')
+            """,
+            (telegram_id, int(value)),
+        )
+        await self.db.commit()
+
+    async def toggle_anonymous(self, telegram_id: int) -> bool:
+        new_val = not await self.is_anonymous(telegram_id)
+        await self.set_anonymous(telegram_id, new_val)
+        return new_val
+
     async def find_by_username(self, username: str) -> dict | None:
         cur = await self.db.execute(
             """
@@ -189,13 +215,16 @@ class Repository:
             SELECT r.target_username, r.total_score, r.gifts_score, r.username_score,
                    r.rater_telegram_id, r.is_self
             FROM ratings r
+            LEFT JOIN users u ON u.telegram_id = r.rater_telegram_id
             INNER JOIN (
                 SELECT rater_telegram_id, MAX(total_score) AS max_score
                 FROM ratings WHERE is_self = 1
                 GROUP BY rater_telegram_id
             ) best ON r.rater_telegram_id = best.rater_telegram_id
                 AND r.total_score = best.max_score
-            WHERE r.is_self = 1 AND r.target_username IS NOT NULL
+            WHERE r.is_self = 1
+              AND r.target_username IS NOT NULL
+              AND COALESCE(u.is_anonymous, 0) = 0
             GROUP BY r.rater_telegram_id
             ORDER BY {order_col} DESC
             LIMIT ?
@@ -215,9 +244,11 @@ class Repository:
         cur = await self.db.execute(
             f"""
             WITH best AS (
-                SELECT rater_telegram_id, MAX({order_col}) as best_score
-                FROM ratings WHERE is_self = 1
-                GROUP BY rater_telegram_id
+                SELECT r.rater_telegram_id, MAX(r.{order_col}) as best_score
+                FROM ratings r
+                LEFT JOIN users u ON u.telegram_id = r.rater_telegram_id
+                WHERE r.is_self = 1 AND COALESCE(u.is_anonymous, 0) = 0
+                GROUP BY r.rater_telegram_id
             ),
             ranked AS (
                 SELECT rater_telegram_id, best_score,
