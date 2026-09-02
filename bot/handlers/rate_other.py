@@ -2,6 +2,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, User
 
@@ -9,7 +10,7 @@ from bot.database.repo import Repository
 from bot.handlers.rate_self import perform_self_rating
 from bot.keyboards.callbacks import RateCB
 from bot.keyboards.inline import main_menu_kb, rate_other_prompt_kb, rate_other_result_kb
-from bot.keyboards.reply import CANCEL_TEXTS, PICK_USER_TEXT, rate_other_pick_kb, remove_kb
+from bot.keyboards.reply import CANCEL_TEXTS, PICK_USER_REQUEST_ID, PICK_USER_TEXT, rate_other_pick_kb, remove_kb
 from bot.services.openai_service import generate_compare_verdict, generate_verdict
 from bot.services.profile_analyzer import analyze_profile, scores_from_rating_row
 from bot.services.profile_fetcher import ResolveResult, get_chat_user, resolve_target_user
@@ -30,12 +31,19 @@ async def perform_other_rating(
     repo: Repository,
     callback: CallbackQuery | None = None,
     has_photo: bool | None = None,
+    progress_msg: Message | None = None,
 ) -> None:
     name = display_name(target.username, target.first_name)
     header = f"{e('search')} <b>Анализирую профиль {name}...</b>"
 
     if callback:
         msg = await edit_or_send(callback, f"{header}\n", repo=repo, user_id=rater.id)
+    elif progress_msg:
+        msg = progress_msg
+        try:
+            await msg.edit_text(f"{header}\n", reply_markup=None, parse_mode="HTML")
+        except TelegramBadRequest:
+            msg = await message.answer(f"{header}\n", reply_markup=remove_kb(), parse_mode="HTML")
     else:
         msg = await message.answer(
             f"{header}\n",
@@ -119,19 +127,24 @@ async def _process_target(message: Message, state: FSMContext, repo: Repository,
     except TelegramBadRequest:
         pass
 
-    if result.user.id == user.id:
-        await state.clear()
-        try:
-            await message.delete()
-        except TelegramBadRequest:
-            pass
-        await perform_self_rating(message, user, repo)
-        return
+    ack: Message | None = None
+    try:
+        ack = await message.answer(
+            f"{e('check')} <b>Пользователь найден</b> — анализирую...",
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest:
+        pass
 
     try:
         await message.delete()
     except TelegramBadRequest:
         pass
+
+    if result.user.id == user.id:
+        await state.clear()
+        await perform_self_rating(message, user, repo, progress_msg=ack)
+        return
 
     try:
         await perform_other_rating(
@@ -140,6 +153,7 @@ async def _process_target(message: Message, state: FSMContext, repo: Repository,
             user,
             repo,
             has_photo=result.has_photo,
+            progress_msg=ack,
         )
         await state.clear()
     except Exception:
@@ -152,14 +166,21 @@ async def _process_target(message: Message, state: FSMContext, repo: Repository,
         )
 
 
-@router.message(RateOtherStates.waiting_target, F.users_shared)
+@router.message(F.users_shared)
 async def receive_users_shared(message: Message, state: FSMContext, repo: Repository) -> None:
+    if not message.users_shared or not message.users_shared.users:
+        return
+    if message.users_shared.request_id != PICK_USER_REQUEST_ID:
+        return
+
+    await state.set_state(RateOtherStates.waiting_target)
     result = await resolve_target_user(message, message.bot, repo)
     await _process_target(message, state, repo, result)
 
 
-@router.message(RateOtherStates.waiting_target, F.contact)
+@router.message(F.contact, StateFilter(None, RateOtherStates.waiting_target))
 async def receive_contact(message: Message, state: FSMContext, repo: Repository) -> None:
+    await state.set_state(RateOtherStates.waiting_target)
     result = await resolve_target_user(message, message.bot, repo)
     await _process_target(message, state, repo, result)
 

@@ -11,6 +11,7 @@ from aiogram.types import Message, MessageOriginHiddenUser, User
 
 from bot.database.repo import Repository
 from bot.keyboards.reply import PICK_USER_REQUEST_ID
+from bot.services import user_client
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,11 @@ async def _resolve_username(bot: Bot, username: str, repo: Repository | None) ->
     if live:
         return ResolveResult(user=live, verified=True)
 
+    if user_client.is_ready():
+        resolved = await user_client.resolve_user(username=username)
+        if resolved:
+            return ResolveResult(user=resolved, verified=True)
+
     if repo:
         for finder in (repo.find_by_username, repo.find_rated_by_username):
             row = await finder(username)
@@ -232,6 +238,11 @@ async def _resolve_username(bot: Bot, username: str, repo: Repository | None) ->
 
 
 async def fetch_profile_description(bot: Bot, user_id: int, username: str | None = None) -> str | None:
+    if user_client.is_ready():
+        bio = await user_client.fetch_profile_bio(user_id, username)
+        if bio:
+            return bio
+
     candidates: list[int | str] = [user_id]
     if username:
         candidates.append(f"@{username.lstrip('@')}")

@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     welcome_sticker_id: str = ""
     database_path: str = "data/bot.db"
 
+    # Optional MTProto user account (gifts + username resolution)
+    telegram_api_id: int = 0
+    telegram_api_hash: str = ""
+    telegram_session: str = ""
+
     # Premium custom emoji IDs (from @PremiumEmoji)
     emoji_fire: str = ""
     emoji_trophy: str = ""

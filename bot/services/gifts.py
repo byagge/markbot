@@ -1,11 +1,29 @@
 import logging
+from dataclasses import dataclass
 
 from aiogram import Bot
 from aiogram.enums import OwnedGiftType
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import OwnedGiftRegular, OwnedGiftUnique
 
+from bot.services import user_client
+
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ParsedGift:
+    is_unique: bool = False
+    star_count: int = 0
+    was_refunded: bool = False
+    model_name: str = ""
+    rarity_per_mille: int = 1000
+    rarity_label: str = ""
+    transfer_stars: int = 0
+    total_count: int = 0
+    remaining_count: int = 0
+    is_premium: bool = False
+    upgrade_star_count: int = 0
 
 
 async def _paginate_gifts(method, id_kw: dict, extra_kw: dict | None = None) -> tuple[int, list]:
@@ -41,15 +59,7 @@ async def _paginate_gifts(method, id_kw: dict, extra_kw: dict | None = None) -> 
     return total_count, gifts
 
 
-async def fetch_all_user_gifts(
-    bot: Bot,
-    user_id: int,
-    username: str | None = None,
-) -> tuple[int, list]:
-    """
-    Profile gifts for regular users: getUserGifts(user_id) / getChatGifts(user_id).
-    getChatGifts(@username) works only for public accounts (e.g. @durov), not typical users.
-    """
+async def _fetch_via_bot(bot: Bot, user_id: int, username: str | None) -> tuple[int, list]:
     attempts: list[tuple[str, object, dict, dict]] = [
         ("user_gifts", bot.get_user_gifts, {"user_id": user_id}, {}),
         ("chat_id", bot.get_chat_gifts, {"chat_id": user_id}, {}),
@@ -76,7 +86,7 @@ async def fetch_all_user_gifts(
             break
 
     logger.info(
-        "gifts for uid=%s username=%s: total=%s fetched=%s source=%s",
+        "bot gifts uid=%s username=%s: total=%s fetched=%s source=%s",
         user_id,
         username,
         best_total,
@@ -84,6 +94,115 @@ async def fetch_all_user_gifts(
         best_source,
     )
     return best_total, best_gifts
+
+
+async def fetch_all_user_gifts(
+    bot: Bot,
+    user_id: int,
+    username: str | None = None,
+) -> tuple[int, list]:
+    bot_total, bot_gifts = await _fetch_via_bot(bot, user_id, username)
+
+    if user_client.is_ready():
+        user_total, user_gifts = await user_client.fetch_saved_gifts(user_id, username)
+        if user_total > bot_total or (user_total == bot_total and len(user_gifts) > len(bot_gifts)):
+            logger.info(
+                "gifts for uid=%s username=%s: total=%s fetched=%s source=user_client",
+                user_id,
+                username,
+                user_total,
+                len(user_gifts),
+            )
+            return user_total, user_gifts
+
+    return bot_total, bot_gifts
+
+
+def _normalize_gift(gift_item) -> ParsedGift | None:
+    if isinstance(gift_item, ParsedGift):
+        return gift_item
+
+    if gift_item.__class__.__name__ == "Gift":
+        return _from_pyrogram_gift(gift_item)
+
+    if isinstance(gift_item, OwnedGiftUnique):
+        gift = gift_item.gift
+        model = gift.model
+        return ParsedGift(
+            is_unique=True,
+            model_name=(model.name if model else None) or gift.base_name or "NFT",
+            rarity_per_mille=model.rarity_per_mille if model else 1000,
+            rarity_label=(model.rarity or "") if model else "",
+            transfer_stars=gift_item.transfer_star_count or 0,
+        )
+
+    if isinstance(gift_item, OwnedGiftRegular):
+        if gift_item.was_refunded:
+            return ParsedGift(was_refunded=True)
+        gift = gift_item.gift
+        if not gift:
+            return None
+        return ParsedGift(
+            star_count=gift.star_count or 0,
+            total_count=gift.total_count or 0,
+            remaining_count=gift.remaining_count or 0,
+            is_premium=bool(gift.is_premium),
+            upgrade_star_count=gift.upgrade_star_count or 0,
+        )
+
+    if getattr(gift_item, "type", None) == OwnedGiftType.UNIQUE:
+        gift = gift_item.gift
+        model = getattr(gift, "model", None)
+        return ParsedGift(
+            is_unique=True,
+            model_name=getattr(model, "name", None) or getattr(gift, "base_name", "NFT"),
+            transfer_stars=getattr(gift_item, "transfer_star_count", 0) or 0,
+        )
+
+    gift = getattr(gift_item, "gift", None)
+    if gift:
+        return ParsedGift(star_count=getattr(gift, "star_count", 0) or 0)
+    return None
+
+
+def _from_pyrogram_gift(gift) -> ParsedGift | None:
+    from pyrogram import enums
+    from pyrogram.types import Gift
+
+    if not isinstance(gift, Gift):
+        return None
+
+    if gift.was_refunded:
+        return ParsedGift(was_refunded=True)
+
+    if gift.type == enums.GiftType.UPGRADED:
+        model_name = gift.title or gift.name or "NFT"
+        rarity_pm = 1000
+        rarity_label = ""
+        if gift.model:
+            model_name = gift.model.name or model_name
+            rarity = gift.model.rarity
+            if rarity is not None:
+                rarity_label = type(rarity).__name__.replace("UpgradedGiftAttributeRarity", "").lower()
+                per_mille = getattr(rarity, "per_mille", None)
+                if per_mille is not None:
+                    rarity_pm = per_mille
+        return ParsedGift(
+            is_unique=True,
+            model_name=model_name,
+            rarity_per_mille=rarity_pm,
+            rarity_label=rarity_label,
+            transfer_stars=gift.transfer_star_count or 0,
+        )
+
+    limits = gift.overall_limits
+    return ParsedGift(
+        star_count=gift.star_count or 0,
+        total_count=limits.total_count or 0 if limits else 0,
+        remaining_count=limits.remaining_count or 0 if limits else 0,
+        is_premium=bool(gift.is_premium),
+        upgrade_star_count=gift.upgrade_star_count or 0,
+    )
 
 
 def _plural_gifts(count: int) -> str:
@@ -98,39 +217,25 @@ def _plural_gifts(count: int) -> str:
     return f"{count} подарков"
 
 
-def _gift_label(gift_item) -> str:
-    if isinstance(gift_item, OwnedGiftUnique):
-        gift = gift_item.gift
-        model = gift.model.name if gift.model else gift.base_name
-        rarity = gift.model.rarity_per_mille if gift.model else 0
-        if rarity and rarity < 50:
-            return f"NFT «{model}» (редкий {rarity}/1000)"
-        return f"NFT «{model}»"
-    if isinstance(gift_item, OwnedGiftRegular):
-        gift = gift_item.gift
-        stars = gift.star_count if gift else 0
-        if gift and gift.total_count:
-            return f"лимитированный ({stars}⭐)"
-        if gift and gift.is_premium:
-            return f"Premium ({stars}⭐)"
-        return f"{stars}⭐"
-    if getattr(gift_item, "type", None) == OwnedGiftType.UNIQUE:
-        gift = gift_item.gift
-        model = getattr(getattr(gift, "model", None), "name", None) or getattr(gift, "base_name", "NFT")
-        return f"NFT «{model}»"
-    gift = getattr(gift_item, "gift", None)
-    stars = getattr(gift, "star_count", 0) or 0
-    return f"{stars}⭐"
+def _gift_label(parsed: ParsedGift) -> str:
+    if parsed.is_unique:
+        if parsed.rarity_per_mille and parsed.rarity_per_mille < 50:
+            return f"NFT «{parsed.model_name}» (редкий {parsed.rarity_per_mille}/1000)"
+        return f"NFT «{parsed.model_name}»"
+    if parsed.total_count:
+        return f"лимитированный ({parsed.star_count}⭐)"
+    if parsed.is_premium:
+        return f"Premium ({parsed.star_count}⭐)"
+    return f"{parsed.star_count}⭐"
 
 
-def _model_points(gift_item) -> float:
-    """Score a single gift by its model / rarity / star value."""
-    if isinstance(gift_item, OwnedGiftUnique):
-        gift = gift_item.gift
-        model = gift.model
-        rarity_pm = model.rarity_per_mille if model else 1000
-        points = max(2.0, (1000 - rarity_pm) / 40)
-        crafted = (model.rarity or "").lower() if model else ""
+def _model_points(parsed: ParsedGift) -> float:
+    if parsed.was_refunded:
+        return 0.0
+
+    if parsed.is_unique:
+        points = max(2.0, (1000 - parsed.rarity_per_mille) / 40)
+        crafted = parsed.rarity_label.lower()
         if crafted == "legendary":
             points += 6
         elif crafted == "epic":
@@ -139,42 +244,30 @@ def _model_points(gift_item) -> float:
             points += 2
         elif crafted == "uncommon":
             points += 1
-        transfer = gift_item.transfer_star_count or 0
+        transfer = parsed.transfer_stars
         if transfer >= 1000:
             points += 3
         elif transfer >= 500:
             points += 2
         return min(18.0, points)
 
-    if isinstance(gift_item, OwnedGiftRegular):
-        if gift_item.was_refunded:
-            return 0.0
-        gift = gift_item.gift
-        if not gift:
-            return 0.0
-        points = min(6.0, gift.star_count / 30)
-        if gift.total_count:
-            scarcity = gift.remaining_count or gift.total_count
-            if scarcity <= 100:
-                points += 4
-            elif scarcity <= 1000:
-                points += 2
-            else:
-                points += 1
-        if gift.is_premium:
-            points += 1.5
-        if gift.upgrade_star_count:
+    points = min(6.0, parsed.star_count / 30)
+    if parsed.total_count:
+        scarcity = parsed.remaining_count or parsed.total_count
+        if scarcity <= 100:
+            points += 4
+        elif scarcity <= 1000:
+            points += 2
+        else:
             points += 1
-        return min(10.0, points)
-
-    if getattr(gift_item, "type", None) == OwnedGiftType.UNIQUE:
-        return 8.0
-    gift = getattr(gift_item, "gift", None)
-    stars = getattr(gift, "star_count", 0) or 0
-    return min(6.0, stars / 30)
+    if parsed.is_premium:
+        points += 1.5
+    if parsed.upgrade_star_count:
+        points += 1
+    return min(10.0, points)
 
 
-def _build_gifts_summary(count: int, visible: list) -> str:
+def _build_gifts_summary(count: int, visible: list[ParsedGift]) -> str:
     if not visible:
         return "подарков нет"
     labels = [_gift_label(g) for g in visible[:20]]
@@ -191,33 +284,26 @@ def analyze_gifts(total_count: int, gifts: list) -> tuple[int, int, str, int, st
     if total_count <= 0 or not gifts:
         return 0, 0, "нет на профиле или скрыты", 0, "подарков нет"
 
-    visible = [
-        g for g in gifts
-        if not isinstance(g, OwnedGiftRegular) or not g.was_refunded
-    ]
-    count = max(total_count, len(visible))
+    parsed = [p for g in gifts if (p := _normalize_gift(g)) and not p.was_refunded]
+    count = max(total_count, len(parsed))
     if count <= 0:
         return 0, 0, "нет на профиле или скрыты", 0, "подарков нет"
 
-    model_scores = [_model_points(g) for g in visible]
+    model_scores = [_model_points(g) for g in parsed]
     total_model = sum(model_scores)
-    avg_model = total_model / len(visible)
+    avg_model = total_model / len(parsed)
 
-    unique_count = sum(
-        1 for g in visible
-        if isinstance(g, OwnedGiftUnique) or getattr(g, "type", None) == OwnedGiftType.UNIQUE
-    )
+    unique_count = sum(1 for g in parsed if g.is_unique)
     total_stars = sum(
-        (g.gift.star_count if isinstance(g, OwnedGiftRegular) and g.gift else 0)
-        + (g.transfer_star_count or 750 if isinstance(g, OwnedGiftUnique) else 0)
-        for g in visible
+        g.star_count + (g.transfer_stars or 750 if g.is_unique else 0)
+        for g in parsed
     )
 
     quantity_pts = min(8, count * 1.5)
     model_pts = min(17, avg_model * 1.4 + min(6, unique_count * 1.5))
     score = min(25, int(quantity_pts + model_pts))
 
-    summary = _build_gifts_summary(count, visible)
+    summary = _build_gifts_summary(count, parsed)
 
     if unique_count and count >= 3:
         note = f"{_plural_gifts(count)} ({unique_count} NFT) — легенда"

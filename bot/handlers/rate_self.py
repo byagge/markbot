@@ -22,12 +22,19 @@ async def perform_self_rating(
     user: User,
     repo: Repository,
     callback: CallbackQuery | None = None,
+    progress_msg: Message | None = None,
 ) -> None:
     header = f"{e('search')} <b>Анализирую твой профиль...</b>"
     loading_text = f"{header}\n"
 
     if callback:
         msg = await edit_or_send(callback, loading_text, repo=repo, user_id=user.id)
+    elif progress_msg:
+        msg = progress_msg
+        try:
+            await msg.edit_text(loading_text, reply_markup=None, parse_mode="HTML")
+        except Exception:
+            msg = await message.answer(loading_text, parse_mode="HTML")
     else:
         msg = message
 
