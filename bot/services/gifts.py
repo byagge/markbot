@@ -101,13 +101,11 @@ async def fetch_all_user_gifts(
     user_id: int,
     username: str | None = None,
 ) -> tuple[int, list]:
-    bot_total, bot_gifts = await _fetch_via_bot(bot, user_id, username)
-
     if user_client.is_ready():
         user_total, user_gifts = await user_client.fetch_saved_gifts(user_id, username)
-        if user_total > bot_total or (user_total == bot_total and len(user_gifts) > len(bot_gifts)):
+        if user_total > 0 or user_gifts:
             logger.info(
-                "gifts for uid=%s username=%s: total=%s fetched=%s source=user_client",
+                "gifts for uid=%s username=%s: total=%s fetched=%s source=pyrogram",
                 user_id,
                 username,
                 user_total,
@@ -115,6 +113,7 @@ async def fetch_all_user_gifts(
             )
             return user_total, user_gifts
 
+    bot_total, bot_gifts = await _fetch_via_bot(bot, user_id, username)
     return bot_total, bot_gifts
 
 
@@ -281,13 +280,21 @@ def analyze_gifts(total_count: int, gifts: list) -> tuple[int, int, str, int, st
     """
     Returns: score (0-25), visible_count, note, total_stars, summary for AI
     """
-    if total_count <= 0 or not gifts:
+    if total_count <= 0:
         return 0, 0, "нет на профиле или скрыты", 0, "подарков нет"
 
     parsed = [p for g in gifts if (p := _normalize_gift(g)) and not p.was_refunded]
     count = max(total_count, len(parsed))
+
     if count <= 0:
         return 0, 0, "нет на профиле или скрыты", 0, "подарков нет"
+
+    if not parsed:
+        quantity_pts = min(8, count * 1.5)
+        score = min(25, int(quantity_pts))
+        note = _plural_gifts(count)
+        summary = f"{count} шт. (детали скрыты)"
+        return score, count, note, 0, summary
 
     model_scores = [_model_points(g) for g in parsed]
     total_model = sum(model_scores)

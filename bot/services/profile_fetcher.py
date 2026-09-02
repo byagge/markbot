@@ -194,14 +194,14 @@ async def resolve_target_user(message: Message, bot: Bot, repo: Repository | Non
 
 
 async def _resolve_username(bot: Bot, username: str, repo: Repository | None) -> ResolveResult:
-    live = await get_chat_user(bot, f"@{username}")
-    if live:
-        return ResolveResult(user=live, verified=True)
-
     if user_client.is_ready():
         resolved = await user_client.resolve_user(username=username)
         if resolved:
             return ResolveResult(user=resolved, verified=True)
+
+    live = await get_chat_user(bot, f"@{username}")
+    if live:
+        return ResolveResult(user=live, verified=True)
 
     if repo:
         for finder in (repo.find_by_username, repo.find_rated_by_username):

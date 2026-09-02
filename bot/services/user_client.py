@@ -71,13 +71,23 @@ def _to_aiogram_user(u) -> User:
     )
 
 
+async def _resolve_peer(user_id: int | None = None, username: str | None = None):
+    """Resolve and cache peer — required before get_chat_gifts by numeric id."""
+    if username:
+        return await _client.get_users(username.lstrip("@"))
+    if user_id:
+        return await _client.get_users(user_id)
+    return None
+
+
 async def resolve_user(username: str | None = None, user_id: int | None = None) -> User | None:
     if not is_ready():
         return None
 
     try:
-        target = user_id if user_id else username.lstrip("@")
-        u = await _client.get_users(target)
+        u = await _resolve_peer(user_id=user_id, username=username)
+        if u is None:
+            return None
         return _to_aiogram_user(u)
     except Exception as exc:
         logger.info("pyrogram resolve failed %s %s: %s", username, user_id, exc)
@@ -89,8 +99,9 @@ async def fetch_profile_bio(user_id: int | None = None, username: str | None = N
         return None
 
     try:
-        target = user_id if user_id else username.lstrip("@")
-        u = await _client.get_users(target)
+        u = await _resolve_peer(user_id=user_id, username=username)
+        if u is None:
+            return None
         bio = getattr(u, "bio", None)
         if bio and bio.strip():
             return bio.strip()
@@ -103,26 +114,36 @@ async def fetch_saved_gifts(user_id: int, username: str | None = None) -> tuple[
     if not is_ready():
         return 0, []
 
-    chat_id = user_id if user_id else username.lstrip("@")
     gifts: list = []
+    total = 0
+
+    try:
+        peer = await _resolve_peer(user_id=user_id, username=username)
+        if peer is None:
+            return 0, []
+        chat_id = peer.id
+    except Exception as exc:
+        logger.info("pyrogram peer resolve failed uid=%s username=%s: %s", user_id, username, exc)
+        return 0, []
 
     try:
         total = await _client.get_chat_gifts_count(chat_id)
     except Exception as exc:
-        logger.info("pyrogram gifts count failed uid=%s: %s", user_id, exc)
-        total = 0
+        logger.info("pyrogram gifts count failed uid=%s: %s", chat_id, exc)
 
     try:
         async for gift in _client.get_chat_gifts(
             chat_id,
             exclude_unsaved=True,
+            exclude_hosted=True,
             sort_by_price=True,
         ):
             gifts.append(gift)
     except Exception as exc:
-        logger.info("pyrogram gifts fetch failed uid=%s: %s", user_id, exc)
-        if not gifts:
-            return 0, []
+        logger.info("pyrogram gifts fetch failed uid=%s: %s", chat_id, exc)
+        if total > 0:
+            return total, gifts
+        return 0, []
 
     count = max(total, len(gifts))
     return count, gifts

@@ -4,7 +4,7 @@ import re
 from aiogram import Bot
 from aiogram.types import User
 
-from bot.services.gifts import analyze_gifts, fetch_all_user_gifts
+from bot.services import user_client
 from bot.services.profile_fetcher import fetch_profile_description, user_has_photo
 from bot.utils.emoji import stars
 
@@ -167,6 +167,11 @@ def _age_score(user_id: int) -> tuple[int, str]:
 
 
 async def analyze_profile(bot: Bot, user: User, has_photo: bool | None = None) -> ProfileScores:
+    if user.username and user_client.is_ready():
+        verified = await user_client.resolve_user(username=user.username)
+        if verified:
+            user = verified
+
     uid = user.id
 
     if has_photo is None:
@@ -174,6 +179,8 @@ async def analyze_profile(bot: Bot, user: User, has_photo: bool | None = None) -
 
     avatar, avatar_note = _avatar_score(user, has_photo)
     username_score, username_note = analyze_username(user.username)
+
+    from bot.services.gifts import analyze_gifts, fetch_all_user_gifts
 
     total_gifts, gifts_list = await fetch_all_user_gifts(bot, uid, user.username)
     gifts, gifts_count, gifts_note, _, gifts_summary = analyze_gifts(total_gifts, gifts_list)
