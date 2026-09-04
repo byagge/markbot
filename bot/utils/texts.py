@@ -61,7 +61,7 @@ def format_compare_result(
 
 def main_menu_text() -> str:
     return (
-        f"{e('fire')} <b>ProfileMark</b> — оцени свой Telegram-профиль!\n\n"
+        f"{e('fire')} <b>PeterRate</b> — оцени свой Telegram-профиль!\n\n"
         f"Узнай рейтинг от 0 до 100, сравни с друзьями и попади в топ {e('trophy')}\n\n"
         f"{e('point_down')} Выбери действие:"
     )

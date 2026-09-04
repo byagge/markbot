@@ -49,7 +49,7 @@ async def stats_text(repo: Repository, period: str) -> str:
         f"{e('star')} <b>Оценок профилей:</b> {ratings}\n"
         f"{e('green')} <b>Активных:</b> {active}\n\n"
         f"{e('chart')} <b>Всего пользователей:</b> {total_users}\n\n"
-        f"<i>ProfileMark Admin Panel</i>"
+        f"<i>PeterRate Admin Panel</i>"
     )
 
 
@@ -78,7 +78,7 @@ async def channels_admin_text(bot, repo: Repository, channels: list[dict]) -> st
 
 
 def admin_panel_text() -> str:
-    return f"{e('tools')} <b>Админ-панель ProfileMark</b>"
+    return f"{e('tools')} <b>Админ-панель PeterRate</b>"
 
 
 @router.message(Command("admin"))

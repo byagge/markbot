@@ -1,1 +1,1 @@
-# ProfileMark bot
+# PeterRate bot

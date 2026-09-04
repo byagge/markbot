@@ -23,7 +23,7 @@ async def main() -> None:
 
     from pyrogram import Client
 
-    app = Client("profilemark_session_gen", api_id=api_id, api_hash=api_hash)
+    app = Client("peterrate_session_gen", api_id=api_id, api_hash=api_hash)
     async with app:
         session = await app.export_session_string()
     print("\nAdd to .env:\n")

@@ -13,7 +13,7 @@ from bot.keyboards.inline import main_menu_kb, rate_other_prompt_kb, rate_other_
 from bot.keyboards.reply import CANCEL_TEXTS, PICK_USER_REQUEST_ID, PICK_USER_TEXT, rate_other_pick_kb, remove_kb
 from bot.services.openai_service import generate_compare_verdict, generate_verdict
 from bot.services.profile_analyzer import analyze_profile, scores_from_rating_row
-from bot.services.profile_fetcher import ResolveResult, get_chat_user, resolve_target_user
+from bot.services.profile_fetcher import ResolveResult, extract_username, get_chat_user, resolve_target_user
 from bot.states import RateOtherStates
 from bot.utils.emoji import e, plain
 from bot.utils.navigation import edit_or_send, run_loading_animation
@@ -32,6 +32,7 @@ async def perform_other_rating(
     callback: CallbackQuery | None = None,
     has_photo: bool | None = None,
     progress_msg: Message | None = None,
+    lookup_username: str | None = None,
 ) -> None:
     name = display_name(target.username, target.first_name)
     header = f"{e('search')} <b>Анализирую профиль {name}...</b>"
@@ -53,7 +54,12 @@ async def perform_other_rating(
 
     try:
         await run_loading_animation(msg, header)
-        scores = await analyze_profile(message.bot, target, has_photo=has_photo)
+        scores = await analyze_profile(
+            message.bot,
+            target,
+            has_photo=has_photo,
+            lookup_username=lookup_username or target.username,
+        )
         verdict = await generate_verdict(target.username, scores, is_self=False)
 
         await repo.upsert_user(
@@ -146,6 +152,10 @@ async def _process_target(message: Message, state: FSMContext, repo: Repository,
         await perform_self_rating(message, user, repo, progress_msg=ack)
         return
 
+    lookup_username = result.user.username
+    if message.text:
+        lookup_username = extract_username(message.text) or lookup_username
+
     try:
         await perform_other_rating(
             message,
@@ -154,6 +164,7 @@ async def _process_target(message: Message, state: FSMContext, repo: Repository,
             repo,
             has_photo=result.has_photo,
             progress_msg=ack,
+            lookup_username=lookup_username,
         )
         await state.clear()
     except Exception:

@@ -1,1 +1,1 @@
-"""ProfileMark — Telegram profile rating bot."""
+"""PeterRate — Telegram profile rating bot."""

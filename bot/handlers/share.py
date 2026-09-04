@@ -34,7 +34,7 @@ async def inline_share(inline_query: InlineQuery, repo: Repository) -> None:
         uname = user.username or "user"
 
     text = (
-        f"{plain('trophy')} Профиль @{uname} — {score}/100 в ProfileMark!\n"
+        f"{plain('trophy')} Профиль @{uname} — {score}/100 в PeterRate!\n"
         f"Оцени свой: @{settings.bot_username_clean}"
     )
     await inline_query.answer(

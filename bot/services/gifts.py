@@ -101,20 +101,41 @@ async def fetch_all_user_gifts(
     user_id: int,
     username: str | None = None,
 ) -> tuple[int, list]:
-    if user_client.is_ready():
-        user_total, user_gifts = await user_client.fetch_saved_gifts(user_id, username)
-        if user_total > 0 or user_gifts:
-            logger.info(
-                "gifts for uid=%s username=%s: total=%s fetched=%s source=pyrogram",
-                user_id,
-                username,
-                user_total,
-                len(user_gifts),
-            )
-            return user_total, user_gifts
+    await user_client.ensure_initialized()
 
-    bot_total, bot_gifts = await _fetch_via_bot(bot, user_id, username)
-    return bot_total, bot_gifts
+    resolved_id = user_id
+    lookup = username
+    if lookup and user_client.is_ready():
+        verified = await user_client.resolve_user(username=lookup)
+        if verified:
+            resolved_id = verified.id
+            lookup = verified.username or lookup
+
+    bot_total, bot_gifts = await _fetch_via_bot(bot, resolved_id, lookup)
+
+    pyro_total, pyro_gifts = 0, []
+    if lookup and user_client.is_ready():
+        pyro_total, pyro_gifts = await user_client.fetch_saved_gifts(resolved_id, lookup)
+
+    if pyro_total > bot_total or len(pyro_gifts) > len(bot_gifts):
+        best_total, best_gifts, source = pyro_total, pyro_gifts, "pyrogram"
+    else:
+        best_total, best_gifts, source = bot_total, bot_gifts, "bot_api"
+
+    best_total = max(best_total, len(best_gifts))
+    logger.info(
+        "gifts uid=%s username=%s: total=%s fetched=%s source=%s (bot=%s/%s pyro=%s/%s)",
+        resolved_id,
+        lookup,
+        best_total,
+        len(best_gifts),
+        source,
+        bot_total,
+        len(bot_gifts),
+        pyro_total,
+        len(pyro_gifts),
+    )
+    return best_total, best_gifts
 
 
 def _normalize_gift(gift_item) -> ParsedGift | None:

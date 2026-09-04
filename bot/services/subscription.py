@@ -10,7 +10,7 @@ async def create_tracked_invite(bot: Bot, channel_id: str) -> str | None:
     try:
         invite = await bot.create_chat_invite_link(
             chat_id=channel_id,
-            name="ProfileMark",
+            name="PeterRate",
         )
         return invite.invite_link
     except TelegramBadRequest:

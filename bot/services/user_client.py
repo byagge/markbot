@@ -21,7 +21,7 @@ async def init(api_id: int, api_hash: str, session: str) -> bool:
         from pyrogram import Client
 
         _client = Client(
-            "profilemark_user",
+            "peterrate_user",
             api_id=api_id,
             api_hash=api_hash,
             session_string=session.strip(),
@@ -43,6 +43,20 @@ async def init(api_id: int, api_hash: str, session: str) -> bool:
         _client = None
         _ready = False
         return False
+
+
+async def ensure_initialized() -> bool:
+    if is_ready():
+        return True
+    from bot.config import settings
+
+    if not settings.telegram_api_id or not settings.telegram_api_hash or not settings.telegram_session:
+        return False
+    return await init(
+        settings.telegram_api_id,
+        settings.telegram_api_hash,
+        settings.telegram_session,
+    )
 
 
 async def close() -> None:
@@ -72,16 +86,24 @@ def _to_aiogram_user(u) -> User:
 
 
 async def _resolve_peer(user_id: int | None = None, username: str | None = None):
-    """Resolve and cache peer — required before get_chat_gifts by numeric id."""
+    """Resolve peer; @username always works, numeric id needs cache."""
     if username:
-        return await _client.get_users(username.lstrip("@"))
+        try:
+            return await _client.get_users(username.lstrip("@"))
+        except Exception as exc:
+            logger.info("pyrogram peer by username %s failed: %s", username, exc)
+
     if user_id:
-        return await _client.get_users(user_id)
+        try:
+            return await _client.get_users(user_id)
+        except Exception as exc:
+            logger.info("pyrogram peer by id %s failed: %s", user_id, exc)
+
     return None
 
 
 async def resolve_user(username: str | None = None, user_id: int | None = None) -> User | None:
-    if not is_ready():
+    if not await ensure_initialized():
         return None
 
     try:
@@ -95,7 +117,7 @@ async def resolve_user(username: str | None = None, user_id: int | None = None) 
 
 
 async def fetch_profile_bio(user_id: int | None = None, username: str | None = None) -> str | None:
-    if not is_ready():
+    if not await ensure_initialized():
         return None
 
     try:
@@ -111,19 +133,23 @@ async def fetch_profile_bio(user_id: int | None = None, username: str | None = N
 
 
 async def fetch_saved_gifts(user_id: int, username: str | None = None) -> tuple[int, list]:
-    if not is_ready():
+    if not await ensure_initialized():
+        return 0, []
+
+    if not username:
+        logger.info("pyrogram gifts skipped uid=%s — no username for peer resolve", user_id)
         return 0, []
 
     gifts: list = []
     total = 0
 
     try:
-        peer = await _resolve_peer(user_id=user_id, username=username)
+        peer = await _resolve_peer(username=username)
         if peer is None:
             return 0, []
         chat_id = peer.id
     except Exception as exc:
-        logger.info("pyrogram peer resolve failed uid=%s username=%s: %s", user_id, username, exc)
+        logger.info("pyrogram peer resolve failed username=%s: %s", username, exc)
         return 0, []
 
     try:
@@ -135,7 +161,6 @@ async def fetch_saved_gifts(user_id: int, username: str | None = None) -> tuple[
         async for gift in _client.get_chat_gifts(
             chat_id,
             exclude_unsaved=True,
-            exclude_hosted=True,
             sort_by_price=True,
         ):
             gifts.append(gift)

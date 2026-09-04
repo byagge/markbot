@@ -1,6 +1,6 @@
-# ProfileMark README
+# PeterRate README
 
-# ProfileMark Bot
+# PeterRate Bot
 
 Telegram-бот для оценки профилей (0–100 баллов) с OpenAI-вердиктами, топом, сравнением и админ-панелью.
 

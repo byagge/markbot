@@ -194,7 +194,7 @@ async def resolve_target_user(message: Message, bot: Bot, repo: Repository | Non
 
 
 async def _resolve_username(bot: Bot, username: str, repo: Repository | None) -> ResolveResult:
-    if user_client.is_ready():
+    if await user_client.ensure_initialized() and user_client.is_ready():
         resolved = await user_client.resolve_user(username=username)
         if resolved:
             return ResolveResult(user=resolved, verified=True)
@@ -214,31 +214,18 @@ async def _resolve_username(bot: Bot, username: str, repo: Repository | None) ->
                 if filled.username and filled.username.lower() != username.lower():
                     continue
                 return ResolveResult(user=filled, verified=True)
-            stored_name = row.get("username") or username
-            if stored_name.lower() != username.lower():
-                continue
-            return ResolveResult(
-                user=User(
-                    id=uid,
-                    is_bot=False,
-                    first_name=row.get("first_name") or username,
-                    username=stored_name,
-                    is_premium=bool(row.get("is_premium")),
-                ),
-                verified=False,
-            )
 
     return ResolveResult(
         error=(
-            f"Не знаю @{username} — человек ещё не писал боту.\n\n"
+            f"Не могу найти @{username}.\n\n"
             "Нажми <b>👤 Выбрать пользователя</b> или перешли его сообщение.\n"
-            "После /start от него @username тоже заработает."
+            "Поиск по @username работает только с Pyrogram session в .env."
         )
     )
 
 
 async def fetch_profile_description(bot: Bot, user_id: int, username: str | None = None) -> str | None:
-    if user_client.is_ready():
+    if await user_client.ensure_initialized() and user_client.is_ready():
         bio = await user_client.fetch_profile_bio(user_id, username)
         if bio:
             return bio

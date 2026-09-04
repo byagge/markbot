@@ -61,7 +61,7 @@ async def main() -> None:
 
     dp.include_router(router)
 
-    logger.info("ProfileMark bot starting...")
+    logger.info("PeterRate bot starting...")
     await dp.start_polling(
         bot,
         allowed_updates=["message", "callback_query", "chat_member", "inline_query"],

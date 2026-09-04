@@ -50,7 +50,7 @@ async def generate_verdict(
         return _fallback_verdict(scores)
 
     name = f"@{username}" if username else "пользователь"
-    prompt = f"""Ты — дерзкий, но дружелюбный бот ProfileMark. Напиши вердикт профиля Telegram в 1-2 предложения.
+    prompt = f"""Ты — дерзкий, но дружелюбный бот PeterRate. Напиши вердикт профиля Telegram в 1-2 предложения.
 Профиль: {name}, итог {scores.total}/100.
 Аватар {scores.avatar}/25, юзернейм {scores.username}/25, подарки {scores.gifts}/25.
 Подарки (реальные данные API, не выдумывай): {scores.gifts_summary}

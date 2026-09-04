@@ -166,23 +166,32 @@ def _age_score(user_id: int) -> tuple[int, str]:
     return age, note
 
 
-async def analyze_profile(bot: Bot, user: User, has_photo: bool | None = None) -> ProfileScores:
-    if user.username and user_client.is_ready():
-        verified = await user_client.resolve_user(username=user.username)
+async def analyze_profile(
+    bot: Bot,
+    user: User,
+    has_photo: bool | None = None,
+    lookup_username: str | None = None,
+) -> ProfileScores:
+    lookup = (lookup_username or user.username or "").lstrip("@") or None
+
+    await user_client.ensure_initialized()
+    if lookup and user_client.is_ready():
+        verified = await user_client.resolve_user(username=lookup)
         if verified:
             user = verified
+            lookup = verified.username or lookup
 
     uid = user.id
 
     if has_photo is None:
-        has_photo = await user_has_photo(bot, uid, user.username)
+        has_photo = await user_has_photo(bot, uid, lookup or user.username)
 
     avatar, avatar_note = _avatar_score(user, has_photo)
     username_score, username_note = analyze_username(user.username)
 
     from bot.services.gifts import analyze_gifts, fetch_all_user_gifts
 
-    total_gifts, gifts_list = await fetch_all_user_gifts(bot, uid, user.username)
+    total_gifts, gifts_list = await fetch_all_user_gifts(bot, uid, lookup or user.username)
     gifts, gifts_count, gifts_note, _, gifts_summary = analyze_gifts(total_gifts, gifts_list)
 
     description = await fetch_profile_description(bot, uid, user.username)

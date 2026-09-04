@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     admin_ids: str = ""
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-    bot_username: str = "ProfileMarkBot"
+    bot_username: str = "PeterRateBot"
     welcome_sticker_id: str = ""
     database_path: str = "data/bot.db"
 
